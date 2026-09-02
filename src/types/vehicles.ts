@@ -1,4 +1,7 @@
-export type VehicleCategory = "van";
+export type VehicleStatus =
+  | "active"
+  | "maintenance"
+  | "inactive";
 
 export type VehicleMediaType =
   | "image"
@@ -7,22 +10,50 @@ export type VehicleMediaType =
 export type VehicleMedia = {
   url: string;
   type: VehicleMediaType;
+  isCover?: boolean;
+};
+
+export type LuggageSize =
+  | "small"
+  | "medium"
+  | "large";
+
+export type LuggageDimensions = {
+  widthCm: number;
+  heightCm: number;
+  depthCm: number;
+};
+
+export type VehicleFeatures = {
+  airConditioning: boolean;
+  wifi: boolean;
+  usb: boolean;
+  powerOutlet: boolean;
+  recliningSeats: boolean;
+  accessibility: boolean;
+  television: boolean;
+  refrigerator: boolean;
 };
 
 export type Vehicle = {
   id: string;
 
-  name: string;
-
   model: string;
+  year: number;
 
-  capacity: number;
+  passengerCapacity: number;
 
-  category: VehicleCategory;
+  luggageSize: LuggageSize;
+  luggageCapacityLiters: number;
+
+  luggageDimensions?: LuggageDimensions;
+
+  status: VehicleStatus;
+
+  features: VehicleFeatures;
 
   media: VehicleMedia[];
 
-  active: boolean;
-
-  occupied: boolean;
+  createdAt?: Date;
+  updatedAt?: Date;
 };

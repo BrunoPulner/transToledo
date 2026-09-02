@@ -13,6 +13,7 @@ export type TripMediaType =
 export type TripMedia = {
   url: string;
   type: TripMediaType;
+  isCover?: boolean;
 };
 
 export type FrequentTrip = {
@@ -25,8 +26,8 @@ export type FrequentTrip = {
 
   location: string;
 
-  latitude: number;
-  longitude: number;
+  latitude: number | null;
+  longitude: number | null;
 
   averageDurationMinutes: number;
 

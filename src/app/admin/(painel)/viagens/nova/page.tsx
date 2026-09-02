@@ -2,28 +2,41 @@
 
 import {
   ArrowLeft,
+  CheckCircle2,
   Clock3,
   ImagePlus,
+  LoaderCircle,
   MapPin,
   Route,
   Save,
   Star,
   Upload,
   Video,
+  X,
 } from "lucide-react";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
-type TripType =
-  | "turismo"
-  | "evento"
-  | "show"
-  | "universidade"
-  | "excursao"
-  | "outro";
+import { createTrip } from "@/services/trips/createTrip";
+import {
+  uploadTripMedia,
+  validateTripMedia,
+} from "@/services/trips/uploadTripMedia";
+import { TripLocationMap } from "@/app/admin/TripLocationMap";
+import type { TripType } from "@/types/trip";
+
+type SelectedMedia = {
+  id: string;
+  file: File;
+  previewUrl: string;
+  type: "image" | "video";
+};
 
 export default function NewFrequentTripPage() {
+  const router = useRouter();
+
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
@@ -58,10 +71,76 @@ export default function NewFrequentTripPage() {
   const [error, setError] =
     useState("");
 
-  function handleSubmit(
+  const [saving, setSaving] =
+    useState(false);
+
+  const [selectedMedia, setSelectedMedia] =
+    useState<SelectedMedia[]>([]);
+
+  const [coverMediaId, setCoverMediaId] =
+    useState<string | null>(null);
+
+  const [savingMessage, setSavingMessage] =
+    useState("Salvando...");
+
+  function handleMediaSelection(files: FileList | null) {
+    if (!files) return;
+
+    const newItems: SelectedMedia[] = [];
+
+    for (const file of Array.from(files)) {
+      const validationError = validateTripMedia(file);
+
+      if (validationError) {
+        newItems.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+        setError(validationError);
+        return;
+      }
+
+      newItems.push({
+        id: crypto.randomUUID(),
+        file,
+        previewUrl: URL.createObjectURL(file),
+        type: file.type.startsWith("image/") ? "image" : "video",
+      });
+    }
+
+    setError("");
+
+    if (!coverMediaId && selectedMedia.length === 0 && newItems[0]) {
+      setCoverMediaId(newItems[0].id);
+    }
+
+    setSelectedMedia((current) => [...current, ...newItems]);
+  }
+
+  function removeMedia(id: string) {
+    setSelectedMedia((current) => {
+      const removed = current.find((item) => item.id === id);
+      if (removed) URL.revokeObjectURL(removed.previewUrl);
+
+      const remaining = current.filter((item) => item.id !== id);
+
+      if (coverMediaId === id) {
+        setCoverMediaId(remaining[0]?.id ?? null);
+      }
+
+      return remaining;
+    });
+  }
+
+  function selectCoverMedia(id: string) {
+    setCoverMediaId(id);
+  }
+
+  async function handleSubmit(
     event: FormEvent<HTMLFormElement>
   ) {
     event.preventDefault();
+
+    if (saving) {
+      return;
+    }
 
     setError("");
 
@@ -111,33 +190,94 @@ export default function NewFrequentTripPage() {
       return;
     }
 
-    /*
-     * Por enquanto apenas validamos.
-     *
-     * No próximo passo vamos enviar
-     * estes dados para nossa API e
-     * salvar no Firestore.
-     */
-    console.log({
-      name,
-      city,
-      state,
-      location,
-      latitude:
-        latitude
-          ? Number(latitude)
-          : null,
-      longitude:
-        longitude
-          ? Number(longitude)
-          : null,
-      averageDurationMinutes:
-        totalMinutes,
-      type,
-      description,
-      active,
-      featured,
-    });
+    const parsedLatitude = latitude
+      ? Number(latitude)
+      : null;
+
+    const parsedLongitude = longitude
+      ? Number(longitude)
+      : null;
+
+    if (
+      parsedLatitude !== null &&
+      (
+        !Number.isFinite(parsedLatitude) ||
+        parsedLatitude < -90 ||
+        parsedLatitude > 90
+      )
+    ) {
+      setError(
+        "Informe uma latitude válida entre -90 e 90."
+      );
+      return;
+    }
+
+    if (
+      parsedLongitude !== null &&
+      (
+        !Number.isFinite(parsedLongitude) ||
+        parsedLongitude < -180 ||
+        parsedLongitude > 180
+      )
+    ) {
+      setError(
+        "Informe uma longitude válida entre -180 e 180."
+      );
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      let media: Awaited<ReturnType<typeof uploadTripMedia>> = [];
+
+      if (selectedMedia.length > 0) {
+        setSavingMessage("Enviando mídias...");
+        media = await uploadTripMedia(
+          selectedMedia.map((item) => item.file),
+          crypto.randomUUID()
+        );
+
+        media = media.map((item, index) => ({
+          ...item,
+          isCover:
+            selectedMedia[index]?.id === coverMediaId,
+        }));
+      }
+
+      setSavingMessage("Salvando viagem...");
+
+      await createTrip({
+        name,
+        city,
+        state,
+        location,
+        latitude: parsedLatitude,
+        longitude: parsedLongitude,
+        averageDurationMinutes:
+          totalMinutes,
+        type,
+        description,
+        media,
+        active,
+        featured,
+      });
+
+      router.push("/admin/viagens");
+      router.refresh();
+    } catch (error) {
+      console.error(
+        "Erro ao salvar viagem:",
+        error
+      );
+
+      setError(
+        "Não foi possível salvar a viagem. Verifique sua conexão e tente novamente."
+      );
+    } finally {
+      setSaving(false);
+      setSavingMessage("Salvando...");
+    }
   }
 
   return (
@@ -448,24 +588,16 @@ export default function NewFrequentTripPage() {
               </div>
             </div>
 
-            {/* MAPA FUTURO */}
-            <div className="mt-5 flex min-h-52 items-center justify-center rounded-xl border border-dashed border-white/10 bg-black/20">
-              <div className="max-w-sm text-center">
-                <MapPin
-                  size={28}
-                  className="mx-auto text-white/20"
-                />
-
-                <p className="mt-3 text-sm font-medium text-white/40">
-                  Pré-visualização do mapa
-                </p>
-
-                <p className="mt-1 text-xs leading-5 text-white/25">
-                  Na próxima etapa podemos integrar a busca e visualização do
-                  Google Maps.
-                </p>
-              </div>
-            </div>
+            <TripLocationMap
+              address={location}
+              latitude={latitude}
+              longitude={longitude}
+              onLocationChange={(nextLocation) => {
+                setLocation(nextLocation.address);
+                setLatitude(String(nextLocation.latitude));
+                setLongitude(String(nextLocation.longitude));
+              }}
+            />
           </section>
 
           {/* DESCRIÇÃO */}
@@ -513,10 +645,19 @@ export default function NewFrequentTripPage() {
 
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               {/* IMAGENS */}
-              <button
-                type="button"
+              <label
                 className="group flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/2 p-5 transition hover:border-yellow-400/40 hover:bg-yellow-400/3"
               >
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  className="sr-only"
+                  onChange={(event) => {
+                    handleMediaSelection(event.target.files);
+                    event.target.value = "";
+                  }}
+                />
                 <ImagePlus
                   size={27}
                   className="text-white/25 transition group-hover:text-yellow-400"
@@ -529,13 +670,22 @@ export default function NewFrequentTripPage() {
                 <span className="mt-1 text-xs text-white/25">
                   JPG, PNG ou WEBP
                 </span>
-              </button>
+              </label>
 
               {/* VÍDEOS */}
-              <button
-                type="button"
+              <label
                 className="group flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/2 p-5 transition hover:border-yellow-400/40 hover:bg-yellow-400/3"
               >
+                <input
+                  type="file"
+                  accept="video/mp4"
+                  multiple
+                  className="sr-only"
+                  onChange={(event) => {
+                    handleMediaSelection(event.target.files);
+                    event.target.value = "";
+                  }}
+                />
                 <Video
                   size={27}
                   className="text-white/25 transition group-hover:text-yellow-400"
@@ -548,8 +698,71 @@ export default function NewFrequentTripPage() {
                 <span className="mt-1 text-xs text-white/25">
                   MP4
                 </span>
-              </button>
+              </label>
             </div>
+
+            {selectedMedia.length > 0 && (
+              <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {selectedMedia.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`relative aspect-video overflow-hidden rounded-xl border-2 bg-black transition ${
+                      coverMediaId === item.id
+                        ? "border-yellow-400"
+                        : "border-white/10"
+                    }`}
+                  >
+                    {item.type === "image" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={item.previewUrl}
+                        alt={item.file.name}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <video
+                        src={item.previewUrl}
+                        className="h-full w-full object-cover"
+                        controls
+                      />
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => removeMedia(item.id)}
+                      aria-label={`Remover ${item.file.name}`}
+                      className="absolute right-2 top-2 flex size-8 items-center justify-center rounded-full bg-black/75 text-white transition hover:bg-red-500"
+                    >
+                      <X size={16} />
+                    </button>
+
+                    {coverMediaId === item.id && (
+                      <span className="absolute left-2 top-2 flex items-center gap-1.5 rounded-full bg-yellow-400 px-3 py-1.5 text-xs font-bold text-black shadow-lg">
+                        <CheckCircle2 size={14} />
+                        Capa da viagem
+                      </span>
+                    )}
+
+                    <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-black/80 px-3 py-2 backdrop-blur-sm">
+                      <span className="min-w-0 truncate text-xs text-white/70">
+                        {item.file.name}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => selectCoverMedia(item.id)}
+                        disabled={coverMediaId === item.id}
+                        className="shrink-0 rounded-lg bg-yellow-400 px-2.5 py-1.5 text-[11px] font-bold text-black transition hover:bg-yellow-300 disabled:cursor-default disabled:bg-white/10 disabled:text-white/50"
+                      >
+                        {coverMediaId === item.id
+                          ? "Selecionada"
+                          : "Usar como capa"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="mt-4 flex items-start gap-2 text-xs leading-5 text-white/25">
               <Upload
@@ -644,11 +857,21 @@ export default function NewFrequentTripPage() {
 
             <button
               type="submit"
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-yellow-400 px-6 text-sm font-bold text-black transition hover:bg-yellow-300"
+              disabled={saving}
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-yellow-400 px-6 text-sm font-bold text-black transition hover:bg-yellow-300 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <Save size={18} />
+              {saving ? (
+                <LoaderCircle
+                  size={18}
+                  className="animate-spin"
+                />
+              ) : (
+                <Save size={18} />
+              )}
 
-              Salvar viagem
+              {saving
+                ? savingMessage
+                : "Salvar viagem"}
             </button>
           </div>
         </form>
