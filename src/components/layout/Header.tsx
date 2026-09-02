@@ -7,33 +7,40 @@ import {
   Sun,
   X,
 } from "lucide-react";
+
+import Image from "next/image";
 import Link from "next/link";
+
 import { usePathname } from "next/navigation";
 import { useTheme } from "@teispace/next-themes";
-import Image from "next/image";
+
 import { useEffect, useState } from "react";
 
 const navigation = [
   {
     label: "Início",
     href: "/",
+    id: "inicio",
   },
-  
   {
     label: "Sobre",
     href: "/#sobre",
+    id: "sobre",
   },
   {
     label: "Frota",
     href: "/frota",
+    id: "frota",
   },
   {
     label: "Destinos",
     href: "/destinos",
+    id: "destinos",
   },
   {
     label: "Contato",
     href: "/contato",
+    id: "contato",
   },
 ];
 
@@ -46,6 +53,77 @@ export function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
+  const [activeSection, setActiveSection] =
+    useState("inicio");
+
+  /*
+   * ESTADO DA AUTENTICAÇÃO
+   */
+  const [isAuthenticated, setIsAuthenticated] =
+    useState(false);
+
+  const [checkingAuth, setCheckingAuth] =
+    useState(true);
+
+  /*
+   * VERIFICA SE EXISTE SESSÃO
+   * ADMINISTRATIVA VÁLIDA
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkAuthentication() {
+      try {
+        const response = await fetch(
+          "/api/auth/status",
+          {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+          }
+        );
+
+        if (!response.ok) {
+          if (!cancelled) {
+            setIsAuthenticated(false);
+          }
+
+          return;
+        }
+
+        const data = await response.json();
+
+        if (!cancelled) {
+          setIsAuthenticated(
+            data.authenticated === true
+          );
+        }
+      } catch (error) {
+        console.error(
+          "Erro ao verificar autenticação:",
+          error
+        );
+
+        if (!cancelled) {
+          setIsAuthenticated(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setCheckingAuth(false);
+        }
+      }
+    }
+
+    checkAuthentication();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
+
+  /*
+   * MONTAGEM + SCROLL DO HEADER
+   */
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
@@ -56,61 +134,177 @@ export function Header() {
 
     handleScroll();
 
-    window.addEventListener("scroll", handleScroll);
+    window.addEventListener(
+      "scroll",
+      handleScroll,
+      {
+        passive: true,
+      }
+    );
 
     return () => {
-      window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener(
+        "scroll",
+        handleScroll
+      );
     };
   }, []);
 
-  function isActive(href: string) {
-    if (href === "/") {
-      return pathname === "/";
+  /*
+   * IDENTIFICA QUAL SECTION DA HOME
+   * ESTÁ SENDO EXIBIDA
+   */
+  useEffect(() => {
+    if (pathname !== "/") {
+      return;
+    }
+
+    const sobreSection =
+      document.getElementById("sobre");
+
+    if (!sobreSection) {
+      return;
+    }
+
+    const handleSectionScroll = () => {
+      const sobreTop =
+        sobreSection.getBoundingClientRect().top;
+
+      if (sobreTop <= 180) {
+        setActiveSection("sobre");
+      } else {
+        setActiveSection("inicio");
+      }
+    };
+
+    handleSectionScroll();
+
+    window.addEventListener(
+      "scroll",
+      handleSectionScroll,
+      {
+        passive: true,
+      }
+    );
+
+    return () => {
+      window.removeEventListener(
+        "scroll",
+        handleSectionScroll
+      );
+    };
+  }, [pathname]);
+
+  /*
+   * BLOQUEIA SCROLL QUANDO
+   * MENU MOBILE ESTIVER ABERTO
+   */
+  useEffect(() => {
+    if (!menuOpen) {
+      document.body.style.overflow = "";
+      return;
+    }
+
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [menuOpen]);
+
+  /*
+   * VERIFICA ITEM ATIVO
+   */
+  function isActive(
+    href: string,
+    id: string
+  ) {
+    if (pathname === "/") {
+      if (id === "inicio") {
+        return activeSection === "inicio";
+      }
+
+      if (id === "sobre") {
+        return activeSection === "sobre";
+      }
+
+      return false;
+    }
+
+    if (href.startsWith("/#")) {
+      return false;
     }
 
     return pathname.startsWith(href);
   }
 
+  function handleNavigation(id: string) {
+    setActiveSection(id);
+    setMenuOpen(false);
+  }
+
+  /*
+   * DESTINO DA ÁREA ADMINISTRATIVA
+   */
+  const adminHref = isAuthenticated
+    ? "/admin/dashboard"
+    : "/admin";
+
+  /*
+   * TEXTO DO BOTÃO
+   */
+  const adminLabel = isAuthenticated
+    ? "Painel"
+    : "Área privada";
+
   return (
     <>
+      {/* HEADER */}
       <header
-        className={`fixed left-0 top-0 z-50 w-full transition-all duration-500 ${
-          scrolled
-            ? "border-b border-white/10 bg-black/80 shadow-lg shadow-black/10 backdrop-blur-xl"
-            : "bg-transparent"
-        }`}
-      >
-        <div className="mx-auto flex h-25 w-full max-w-375 items-center justify-between px-5 lg:h-24 lg:px-10">
-          {/* LOGO */}
-<Link
-  href="/"
-  className="relative z-50 flex items-center"
-  onClick={() => setMenuOpen(false)}
-  aria-label="Ir para o início"
+  className={`fixed left-0 top-0 z-50 w-full transition-all duration-500 ${
+    scrolled
+      ? "bg-black/80 shadow-md shadow-black/20 backdrop-blur-xl"
+      : "bg-transparent"
+  }`}
 >
-  <Image
-  src="/images/logo/logo_semfundo_att.png"
-  alt="TransToledo Transportes"
-  width={320}
-  height={120}
-  priority
-  sizes="(max-width: 1024px) 180px, 240px"
-  className="h-auto w-45 object-contain lg:w-50 mt-5"
-/>
-</Link>
+        <div className="mx-auto flex h-28 w-full max-w-375 items-center justify-between px-5 lg:h-28 lg:px-10">
+          {/* LOGO */}
+          <Link
+            href="/"
+            className="relative z-50 flex items-center"
+            onClick={() =>
+              handleNavigation("inicio")
+            }
+            aria-label="Ir para o início"
+          >
+            <Image
+              src="/images/logo/logo_semfundo_att.png"
+              alt="TransToledo Transportes"
+              width={320}
+              height={120}
+              sizes="(max-width: 1024px) 180px, 200px"
+              className="h-auto w-45 object-contain lg:w-50"
+            />
+          </Link>
 
-          {/* DESKTOP */}
+          {/* MENU DESKTOP */}
           <nav className="hidden items-center gap-9 lg:flex">
             {navigation.map((item) => {
-              const active = isActive(item.href);
+              const active = isActive(
+                item.href,
+                item.id
+              );
 
               return (
                 <Link
-                  key={item.href}
+                  key={item.id}
                   href={item.href}
-                  className={`group relative py-3 text-sm font-medium transition-colors ${
+                  onClick={() =>
+                    handleNavigation(item.id)
+                  }
+                  className={`group relative py-3 text-sm font-medium transition-colors duration-300 ${
                     active
-                      ? "text-white"
+                      ? "text-yellow-500"
                       : "text-white/70 hover:text-white"
                   }`}
                 >
@@ -128,44 +322,56 @@ export function Header() {
             })}
           </nav>
 
-          {/* AÇÕES */}
+          {/* AÇÕES DESKTOP */}
           <div className="hidden items-center gap-3 lg:flex">
+            {/* TEMA */}
             <button
               type="button"
               onClick={() =>
-  setTheme(
-    resolvedTheme === "dark"
-      ? "light"
-      : "dark"
-  )
-}
-              className="flex size-11 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white transition hover:border-yellow-400/50 hover:bg-white/10 hover:text-yellow-400"
+                setTheme(
+                  resolvedTheme === "dark"
+                    ? "light"
+                    : "dark"
+                )
+              }
+              className="flex size-11 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white transition duration-300 hover:border-yellow-400/50 hover:bg-white/10 hover:text-yellow-400"
               aria-label="Alterar tema"
             >
               {mounted &&
-  (resolvedTheme === "dark" ? (
-    <Sun size={18} />
-  ) : (
-    <Moon size={18} />
-  ))}
+                (resolvedTheme === "dark" ? (
+                  <Sun size={18} />
+                ) : (
+                  <Moon size={18} />
+                ))}
             </button>
 
-            <Link
-              href="/admin"
-              className="flex items-center gap-2 rounded-full border border-yellow-400/70 px-5 py-3 text-sm font-semibold text-yellow-400 transition duration-300 hover:bg-yellow-400 hover:text-black"
-            >
-              <LockKeyhole size={16} />
+            {/* ÁREA ADMINISTRATIVA */}
+            {!checkingAuth && (
+              <Link
+                href={adminHref}
+                className="flex items-center gap-2 rounded-full border border-yellow-400/70 px-5 py-3 text-sm font-semibold text-yellow-400 transition duration-300 hover:bg-yellow-400 hover:text-black"
+              >
+                <LockKeyhole size={16} />
 
-              Área privada
-            </Link>
+                {adminLabel}
+              </Link>
+            )}
           </div>
 
-          {/* MOBILE */}
+          {/* BOTÃO MOBILE */}
           <button
             type="button"
-            onClick={() => setMenuOpen((value) => !value)}
-            className="relative z-50 flex size-11 items-center justify-center rounded-full border border-white/15 bg-black/20 text-white backdrop-blur-md lg:hidden"
-            aria-label="Abrir menu"
+            onClick={() =>
+              setMenuOpen(
+                (value) => !value
+              )
+            }
+            className="relative z-50 flex size-11 items-center justify-center rounded-full border border-white/15 bg-black/20 text-white backdrop-blur-md transition duration-300 hover:border-yellow-400/40 hover:text-yellow-400 lg:hidden"
+            aria-label={
+              menuOpen
+                ? "Fechar menu"
+                : "Abrir menu"
+            }
           >
             {menuOpen ? (
               <X size={21} />
@@ -177,7 +383,6 @@ export function Header() {
       </header>
 
       {/* MENU MOBILE */}
-
       <div
         className={`fixed inset-0 z-40 bg-[#07090b] transition-all duration-500 lg:hidden ${
           menuOpen
@@ -185,33 +390,60 @@ export function Header() {
             : "pointer-events-none opacity-0"
         }`}
       >
-        <div className="flex min-h-screen flex-col justify-center px-8">
-          <nav className="flex flex-col">
-            {navigation.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setMenuOpen(false)}
-                className={`border-b border-white/10 py-5 font-(family-name:--font-montserrat) text-3xl font-bold ${
-                  isActive(item.href)
-                    ? "text-yellow-400"
-                    : "text-white"
-                }`}
-              >
-                {item.label}
-              </Link>
-            ))}
+        <div className="flex min-h-dvh flex-col items-center justify-center px-6 pt-24">
+          {/* NAVEGAÇÃO */}
+          <nav className="flex w-full max-w-sm flex-col items-center">
+            {navigation.map((item) => {
+              const active = isActive(
+                item.href,
+                item.id
+              );
+
+              return (
+                <Link
+                  key={item.id}
+                  href={item.href}
+                  onClick={() =>
+                    handleNavigation(item.id)
+                  }
+                  className="group relative flex w-full items-center justify-center py-4 text-center font-(family-name:--font-montserrat) text-2xl font-bold"
+                >
+                  <span
+                    className={`relative transition-colors duration-300 ${
+                      active
+                        ? "text-yellow-400"
+                        : "text-white"
+                    }`}
+                  >
+                    {item.label}
+
+                    <span
+                      className={`absolute -bottom-2 left-1/2 h-0.5 -translate-x-1/2 bg-yellow-400 transition-all duration-300 ${
+                        active
+                          ? "w-full"
+                          : "w-0"
+                      }`}
+                    />
+                  </span>
+                </Link>
+              );
+            })}
           </nav>
 
-          <Link
-            href="/admin"
-            onClick={() => setMenuOpen(false)}
-            className="mt-10 flex items-center justify-center gap-2 rounded-full bg-yellow-400 px-6 py-4 font-bold text-black"
-          >
-            <LockKeyhole size={18} />
+          {/* ÁREA ADMINISTRATIVA MOBILE */}
+          {!checkingAuth && (
+            <Link
+              href={adminHref}
+              onClick={() =>
+                setMenuOpen(false)
+              }
+              className="mt-9 flex items-center justify-center gap-2 rounded-full bg-yellow-400 px-7 py-3 text-sm font-bold text-black transition duration-300 hover:scale-[1.03] hover:bg-yellow-300"
+            >
+              <LockKeyhole size={16} />
 
-            Área privada
-          </Link>
+              {adminLabel}
+            </Link>
+          )}
         </div>
       </div>
     </>

@@ -56,7 +56,7 @@ export function HomeLoading() {
             className="absolute inset-0 h-full w-full object-cover"
           >
             <source
-              src="images/destinations/serra.mp4"
+              src="/images/destinations/serra.mp4"
               type="video/mp4"
             />
           </video>
@@ -93,8 +93,6 @@ export function HomeLoading() {
                 alt="TransToledo Transportes"
                 width={400}
                 height={180}
-                priority
-                quality={100}
                 className="h-auto w-57.5 object-contain sm:w-70 lg:w-[320px]"
               />
             </motion.div>
