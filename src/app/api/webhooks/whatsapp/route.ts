@@ -1,7 +1,6 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 
-import { adminDb } from "@/lib/firebase/admin";
 import { hashVerificationValue, verifyMetaSignature } from "@/lib/phone-verification";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +53,10 @@ export async function POST(request: Request) {
 }
 
 async function processMessage(message: MetaMessage) {
+  // O Firebase Admin é carregado apenas quando uma mensagem realmente chega.
+  // Dessa forma, a validação GET inicial da Meta não depende do Firestore.
+  const { adminDb } = await import("@/lib/firebase/admin");
+
   const sender = message.from ? `+${message.from.replace(/\D/g, "")}` : null;
   const code = (message.text?.body ?? "")
     .toUpperCase()
