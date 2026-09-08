@@ -20,6 +20,7 @@ import {
   type FormEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 
 import type {
   VehicleDateSelection,
@@ -86,6 +87,7 @@ export function QuoteRequestDialog({
   onClose,
   onSave,
 }: QuoteRequestDialogProps) {
+  const router = useRouter();
   const [contact, setContact] =
     useState<QuoteContactDraft>(
       initialContact ?? {
@@ -127,43 +129,15 @@ export function QuoteRequestDialog({
         phoneVerificationToken: verificationToken,
       };
 
-      try {
-        const response = await fetch("/api/quote-requests", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            vehicleId: vehicle.id,
-            startsAt: selection.departureDate.toISOString(),
-            endsAt: selection.returnDate.toISOString(),
-            ...verifiedContact,
-          }),
-        });
-        const result = (await response.json()) as {
-          success?: boolean;
-          message?: string;
-          quoteRequestId?: string;
-        };
-
-        if (!response.ok || !result.success || !result.quoteRequestId) {
-          throw new Error(result.message ?? "Não foi possível salvar a solicitação.");
-        }
-
-        setStep("contact");
-        setVerification(null);
-        onSave(verifiedContact);
-        return true;
-      } catch (error) {
-        setRequestError(
-          error instanceof Error
-            ? error.message
-            : "Não foi possível salvar a solicitação.",
-        );
-        return false;
-      } finally {
-        completingRequest.current = false;
-        setSubmitting(false);
-      }
-    }, [contact.email, contact.name, contact.phone, onSave, selection, vehicle.id],
+      console.info("Telefone verificado com sucesso", {
+        phone: verifiedContact.phone,
+      });
+      setStep("contact");
+      setVerification(null);
+      onSave(verifiedContact);
+      router.push("/");
+      return true;
+    }, [contact.email, contact.name, contact.phone, onSave, router],
   );
 
   useEffect(() => {

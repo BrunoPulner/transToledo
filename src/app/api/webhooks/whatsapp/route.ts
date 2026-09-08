@@ -36,6 +36,7 @@ export async function POST(request: Request) {
   const rawBody = await request.text();
   const signature = request.headers.get("x-hub-signature-256");
   if (!verifyMetaSignature(rawBody, signature)) {
+    console.warn("Webhook do WhatsApp recusado: assinatura inválida.");
     return NextResponse.json({ success: false }, { status: 401 });
   }
 
@@ -44,6 +45,9 @@ export async function POST(request: Request) {
     const messages = payload.entry?.flatMap((entry) =>
       entry.changes?.flatMap((change) => change.value?.messages ?? []) ?? [],
     ) ?? [];
+    console.info("Webhook do WhatsApp recebido", {
+      messageCount: messages.length,
+    });
     await Promise.all(messages.map(processMessage));
   } catch (error) {
     console.error("Erro ao processar webhook do WhatsApp:", error);
@@ -61,7 +65,10 @@ async function processMessage(message: MetaMessage) {
   const code = (message.text?.body ?? "")
     .toUpperCase()
     .match(/TT-[A-HJ-NP-Z2-9]{6}/)?.[0];
-  if (!sender || !code) return;
+  if (!sender || !code) {
+    console.info("Webhook sem mensagem de texto ou sem código TT válido.");
+    return;
+  }
 
   const snapshot = await adminDb
     .collection("phoneVerifications")
@@ -69,19 +76,34 @@ async function processMessage(message: MetaMessage) {
     .limit(1)
     .get();
   const document = snapshot.docs[0];
-  if (!document) return;
+  if (!document) {
+    console.info("Código recebido não encontrado ou já consumido.");
+    return;
+  }
 
   const data = document.data();
   const expiresAt = data.expiresAt?.toDate?.();
-  if (
-    data.status !== "pending" ||
-    data.phone !== sender ||
-    !(expiresAt instanceof Date) ||
-    expiresAt <= new Date()
-  ) return;
+  if (data.status !== "pending") {
+    console.info("Código recebido não está pendente.");
+    return;
+  }
+  if (data.phone !== sender) {
+    console.warn("Telefone remetente não corresponde ao orçamento", {
+      expectedEnding: String(data.phone ?? "").slice(-4),
+      senderEnding: sender.slice(-4),
+    });
+    return;
+  }
+  if (!(expiresAt instanceof Date) || expiresAt <= new Date()) {
+    console.info("Código recebido está expirado.");
+    return;
+  }
 
   await document.ref.update({
     status: "verified",
     verifiedAt: FieldValue.serverTimestamp(),
+  });
+  console.info("Telefone verificado com sucesso", {
+    phoneEnding: sender.slice(-4),
   });
 }
