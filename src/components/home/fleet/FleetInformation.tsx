@@ -10,6 +10,7 @@ import {
   ArrowRight,
   BriefcaseBusiness,
   CalendarDays,
+  CalendarRange,
   ChevronDown,
   ChevronUp,
   Maximize2,
@@ -24,15 +25,19 @@ import {
   Wifi,
 } from "lucide-react";
 
-import Link from "next/link";
-
 import {
   useState,
 } from "react";
 
 import {
   PublicVehicleCalendar,
+  type VehicleDateSelection,
 } from "./PublicVehicleCalendar";
+
+import {
+  QuoteRequestDialog,
+  type QuoteContactDraft,
+} from "./QuoteRequestDialog";
 
 import type {
   Vehicle,
@@ -105,6 +110,25 @@ export function FleetInformation({
     collapsed,
     setCollapsed,
   ] = useState(false);
+
+  const [
+    selectedPeriod,
+    setSelectedPeriod,
+  ] = useState<VehicleDateSelection | null>(
+    null,
+  );
+
+  const [
+    contactDialogOpen,
+    setContactDialogOpen,
+  ] = useState(false);
+
+  const [
+    contactDraft,
+    setContactDraft,
+  ] = useState<QuoteContactDraft | null>(
+    null,
+  );
 
   const enabledFeatures =
     featureDetails.filter(
@@ -322,10 +346,10 @@ export function FleetInformation({
                 className="
                   mt-3
                   grid
-                  items-center
-                  gap-2
+                  items-stretch
+                  gap-3
                   sm:grid-cols-2
-                  lg:grid-cols-[auto_auto_minmax(0,1fr)_auto]
+                  lg:grid-cols-3
                 "
               >
                 {/* CAPACIDADE */}
@@ -333,6 +357,7 @@ export function FleetInformation({
                   icon={UsersRound}
                   label="Capacidade"
                   value={`${vehicle.passengerCapacity} passageiros`}
+                  description="Lotação máxima cadastrada"
                 />
 
                 {/* BAGAGEM */}
@@ -354,6 +379,17 @@ export function FleetInformation({
                   }
                 />
 
+                <InformationItem
+                  icon={BriefcaseBusiness}
+                  label="Dimensões do bagageiro"
+                  value={
+                    dimensions
+                      ? `${dimensions.widthCm} × ${dimensions.heightCm} × ${dimensions.depthCm} cm`
+                      : "Não informadas"
+                  }
+                  description="Largura × altura × profundidade"
+                />
+
                 {/* COMODIDADES */}
                 <div
                   className="
@@ -362,19 +398,31 @@ export function FleetInformation({
                     border
                     border-white/7
                     bg-white/4
-                    px-3
-                    py-2.5
+                    px-4
+                    py-3.5
                     sm:col-span-2
-                    lg:col-span-1
+                    lg:col-span-3
                   "
                 >
-                  <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-white/30">
-                    Comodidades
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-yellow-400/10 text-yellow-400">
+                      <Snowflake size={15} />
+                    </span>
+
+                    <div>
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-white/30">
+                        Conforto e comodidades
+                      </p>
+
+                      <p className="mt-0.5 text-[11px] text-white/55">
+                        Recursos disponíveis neste veículo
+                      </p>
+                    </div>
+                  </div>
 
                   {enabledFeatures.length >
                   0 ? (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                       {enabledFeatures.map(
                         (
                           feature,
@@ -388,17 +436,18 @@ export function FleetInformation({
                                 feature.key
                               }
                               className="
-                                inline-flex
+                                flex
                                 items-center
                                 gap-1.5
-                                rounded-full
+                                rounded-xl
                                 border
                                 border-white/10
                                 bg-black/10
-                                px-2
-                                py-1
-                                text-[10px]
-                                text-white/65
+                                px-3
+                                py-2.5
+                                text-[11px]
+                                font-medium
+                                text-white/70
                               "
                             >
                               <Icon
@@ -417,69 +466,12 @@ export function FleetInformation({
                       )}
                     </div>
                   ) : (
-                    <p className="mt-1 text-[11px] text-white/35">
+                    <p className="mt-3 text-[11px] text-white/35">
                       Nenhuma comodidade informada.
                     </p>
                   )}
                 </div>
 
-                {/* ORÇAMENTO */}
-                <Link
-                  href={`/orcamento?vehicleId=${vehicle.id}`}
-                  className="
-                    group
-                    flex
-                    h-11
-                    items-center
-                    justify-center
-                    gap-3
-                    rounded-xl
-                    bg-red-600
-                    px-4
-                    text-xs
-                    font-bold
-                    text-white
-                    shadow-lg
-                    shadow-red-950/20
-                    transition
-                    hover:bg-red-500
-                    sm:col-span-2
-                    lg:col-span-1
-                    lg:w-44
-                  "
-                >
-                  Solicitar orçamento
-
-                  <ArrowRight
-                    size={16}
-                    className="shrink-0 transition-transform group-hover:translate-x-1"
-                  />
-                </Link>
-
-                {/* INFORMAÇÕES COMPLEMENTARES */}
-                {(dimensions ||
-                  vehicle.luggageCapacityLiters >
-                    0) && (
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 px-1 text-[10px] text-white/30 sm:col-span-2 lg:col-span-4">
-                    {dimensions && (
-                      <span>
-                        Dimensões do bagageiro:{" "}
-                        {
-                          dimensions.widthCm
-                        }{" "}
-                        ×{" "}
-                        {
-                          dimensions.heightCm
-                        }{" "}
-                        ×{" "}
-                        {
-                          dimensions.depthCm
-                        }{" "}
-                        cm
-                      </span>
-                    )}
-                  </div>
-                )}
               </div>
             ) : (
               <div
@@ -497,7 +489,71 @@ export function FleetInformation({
                   vehicleId={
                     vehicle.id
                   }
+                  onSelectionChange={
+                    setSelectedPeriod
+                  }
                 />
+
+                <div className="mt-3 flex flex-col gap-3 rounded-2xl border border-white/8 bg-white/3 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-yellow-400/10 text-yellow-400">
+                      <CalendarRange size={17} />
+                    </span>
+
+                    <div className="min-w-0">
+                      <p className="text-[9px] font-bold uppercase tracking-[0.13em] text-white/30">
+                        Resumo da solicitação
+                      </p>
+
+                      {selectedPeriod ? (
+                        <p className="mt-1 text-xs leading-5 text-white/70">
+                          <strong className="text-white">
+                            {vehicle.model}
+                          </strong>{" "}
+                          — saída em{" "}
+                          {formatDate(
+                            selectedPeriod.departureDate,
+                          )}{" às "}
+                          {formatTime(
+                            selectedPeriod.departureDate,
+                          )}{" "}
+                          e retorno em{" "}
+                          {formatDate(
+                            selectedPeriod.returnDate,
+                          )}{" às "}
+                          {formatTime(
+                            selectedPeriod.returnDate,
+                          )}.
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-xs leading-5 text-white/35">
+                          Escolha a data de saída e de retorno para continuar.
+                        </p>
+                      )}
+
+                      {contactDraft && (
+                        <p className="mt-1 text-[10px] text-emerald-300/75">
+                          Dados de contato preenchidos para {contactDraft.name}.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={!selectedPeriod}
+                    onClick={() =>
+                      setContactDialogOpen(true)
+                    }
+                    className="group flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-red-600 px-5 text-xs font-bold text-white shadow-lg shadow-red-950/25 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-white/8 disabled:text-white/25 disabled:shadow-none"
+                  >
+                    Solicitar orçamento
+                    <ArrowRight
+                      size={15}
+                      className="transition-transform group-hover:translate-x-0.5"
+                    />
+                  </button>
+                </div>
               </div>
             )}
           </motion.div>
@@ -534,8 +590,45 @@ export function FleetInformation({
           Recolher
         </button>
       )}
+
+      {selectedPeriod && (
+        <QuoteRequestDialog
+          open={contactDialogOpen}
+          vehicle={vehicle}
+          selection={selectedPeriod}
+          initialContact={contactDraft}
+          onClose={() =>
+            setContactDialogOpen(false)
+          }
+          onSave={(contact) => {
+            setContactDraft(contact);
+            setContactDialogOpen(false);
+          }}
+        />
+      )}
     </div>
   );
+}
+
+const publicDateFormatter =
+  new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+
+function formatDate(date: Date) {
+  return publicDateFormatter.format(date);
+}
+
+const publicTimeFormatter =
+  new Intl.DateTimeFormat("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+function formatTime(date: Date) {
+  return publicTimeFormatter.format(date);
 }
 
 type PanelButtonProps = {
@@ -601,8 +694,8 @@ function InformationItem({
         border
         border-white/7
         bg-white/4
-        px-3
-        py-2.5
+        px-4
+        py-3.5
       "
     >
       <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-yellow-400/10 text-yellow-400">
@@ -614,12 +707,12 @@ function InformationItem({
           {label}
         </p>
 
-        <p className="mt-0.5 truncate text-[11px] font-semibold text-white">
+        <p className="mt-1 text-xs font-semibold text-white">
           {value}
         </p>
 
         {description && (
-          <p className="text-[9px] text-white/30">
+          <p className="mt-0.5 text-[9px] leading-4 text-white/30">
             {description}
           </p>
         )}

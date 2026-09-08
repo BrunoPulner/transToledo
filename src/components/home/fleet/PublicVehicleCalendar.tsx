@@ -13,6 +13,10 @@ import {
   useState,
 } from "react";
 
+import {
+  TimeSelectionDialog,
+} from "./TimeSelectionDialog";
+
 export type VehicleDateSelection = {
   departureDate: Date;
   returnDate: Date;
@@ -42,6 +46,13 @@ const weekDays = [
   "Sex",
   "Sáb",
 ];
+
+/*
+ * Intervalo público padrão.
+ * Depois este valor poderá vir das
+ * configurações cadastradas pelo admin.
+ */
+const PUBLIC_TIME_INTERVAL_MINUTES = 30;
 
 const monthFormatter =
   new Intl.DateTimeFormat(
@@ -179,35 +190,19 @@ function rangeHasConflict(
   endDate: Date,
   periods: BusyPeriod[],
 ) {
-  const currentDate =
-    startOfDay(
-      startDate,
+  return periods.some((period) => {
+    const periodStart = new Date(
+      period.startsAt,
+    );
+    const periodEnd = new Date(
+      period.endsAt,
     );
 
-  const finalDate =
-    startOfDay(
-      endDate,
+    return (
+      startDate < periodEnd &&
+      endDate > periodStart
     );
-
-  while (
-    currentDate.getTime() <=
-    finalDate.getTime()
-  ) {
-    if (
-      getPeriodsForDay(
-        periods,
-        currentDate,
-      ).length > 0
-    ) {
-      return true;
-    }
-
-    currentDate.setDate(
-      currentDate.getDate() + 1,
-    );
-  }
-
-  return false;
+  });
 }
 
 export function PublicVehicleCalendar({
@@ -262,6 +257,14 @@ export function PublicVehicleCalendar({
   ] = useState(false);
 
   const [
+    timeSelection,
+    setTimeSelection,
+  ] = useState<{
+    day: Date;
+    mode: "departure" | "return";
+  } | null>(null);
+
+  const [
     selectionError,
     setSelectionError,
   ] = useState("");
@@ -300,6 +303,7 @@ export function PublicVehicleCalendar({
         setDepartureDate(null);
         setReturnDate(null);
         setSelectionFinished(false);
+        setTimeSelection(null);
 
         const response =
           await fetch(
@@ -441,6 +445,7 @@ export function PublicVehicleCalendar({
     );
 
     setInspectionDay(null);
+    setTimeSelection(null);
   }
 
   function nextMonth() {
@@ -482,31 +487,7 @@ export function PublicVehicleCalendar({
       return;
     }
 
-    const dayPeriods =
-      getPeriodsForDay(
-        busyPeriods,
-        day,
-      );
-
-    /*
-     * Dias ocupados abrem somente
-     * os detalhes do agendamento.
-     */
-    if (
-      dayPeriods.length > 0
-    ) {
-      setInspectionDay(
-        day,
-      );
-
-      setSelectionError(
-        "Este veículo não está disponível nesta data.",
-      );
-
-      return;
-    }
-
-    setInspectionDay(null);
+    setInspectionDay(day);
     setSelectionError("");
 
     /*
@@ -517,21 +498,9 @@ export function PublicVehicleCalendar({
       !departureDate ||
       selectionFinished
     ) {
-      setDepartureDate(
+      setTimeSelection({
         day,
-      );
-
-      setReturnDate(
-        day,
-      );
-
-      setSelectionFinished(
-        false,
-      );
-
-      onSelectionChange?.({
-        departureDate: day,
-        returnDate: day,
+        mode: "departure",
       });
 
       return;
@@ -542,59 +511,101 @@ export function PublicVehicleCalendar({
      * inicia uma nova seleção.
      */
     if (
-      day.getTime() <
-      departureDate.getTime()
+      startOfDay(day).getTime() <
+      startOfDay(departureDate).getTime()
     ) {
-      setDepartureDate(
+      setTimeSelection({
         day,
-      );
-
-      setReturnDate(
-        day,
-      );
-
-      setSelectionFinished(
-        false,
-      );
-
-      onSelectionChange?.({
-        departureDate: day,
-        returnDate: day,
+        mode: "departure",
       });
 
       return;
     }
 
-    /*
-     * Impede selecionar um período
-     * que atravesse uma reserva ou
-     * bloqueio existente.
-     */
+    setTimeSelection({
+      day,
+      mode: "return",
+    });
+  }
+
+  function confirmTime(date: Date) {
+    if (!timeSelection) {
+      return;
+    }
+
+    if (timeSelection.mode === "departure") {
+      setDepartureDate(date);
+      setReturnDate(null);
+      setSelectionFinished(false);
+      setSelectionError("");
+      setTimeSelection(null);
+      onSelectionChange?.(null);
+      return;
+    }
+
+    if (!departureDate || date <= departureDate) {
+      setSelectionError(
+        "O retorno deve acontecer depois da saída.",
+      );
+      setTimeSelection(null);
+      return;
+    }
+
     if (
       rangeHasConflict(
         departureDate,
-        day,
+        date,
         busyPeriods,
       )
     ) {
       setSelectionError(
-        "Existe uma data indisponível entre a saída e o retorno.",
+        "Já existe um agendamento ou bloqueio dentro deste período.",
       );
-
+      setTimeSelection(null);
       return;
     }
 
-    setReturnDate(
-      day,
-    );
-
-    setSelectionFinished(
-      true,
-    );
-
+    setReturnDate(date);
+    setSelectionFinished(true);
+    setSelectionError("");
+    setTimeSelection(null);
     onSelectionChange?.({
       departureDate,
-      returnDate: day,
+      returnDate: date,
+    });
+  }
+
+  function isTimeDisabled(date: Date) {
+    if (date <= new Date()) {
+      return true;
+    }
+
+    if (
+      timeSelection?.mode === "return" &&
+      departureDate
+    ) {
+      return (
+        date <= departureDate ||
+        rangeHasConflict(
+          departureDate,
+          date,
+          busyPeriods,
+        )
+      );
+    }
+
+    return busyPeriods.some((period) => {
+      const startsAt = new Date(
+        period.startsAt,
+      );
+      const endsAt = new Date(
+        period.endsAt,
+      );
+
+      return (
+        date >= startsAt &&
+        date < endsAt
+      );
     });
   }
 
@@ -921,24 +932,30 @@ export function PublicVehicleCalendar({
           {!loading &&
             !error && (
               <>
-                {departureDate &&
-                returnDate ? (
+                {departureDate ? (
                   <div className="mt-3 space-y-2">
                     <DateInformation
                       label="Saída"
-                      value={dayFormatter.format(
-                        departureDate,
-                      )}
+                      value={`${dayFormatter.format(departureDate)} às ${timeFormatter.format(departureDate)}`}
                       color="blue"
                     />
 
-                    <DateInformation
-                      label="Retorno"
-                      value={dayFormatter.format(
-                        returnDate,
-                      )}
-                      color="violet"
-                    />
+                    {returnDate ? (
+                      <DateInformation
+                        label="Retorno"
+                        value={`${dayFormatter.format(returnDate)} às ${timeFormatter.format(returnDate)}`}
+                        color="violet"
+                      />
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-violet-400/20 px-3 py-2.5">
+                        <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-violet-300/60">
+                          Retorno
+                        </p>
+                        <p className="mt-1 text-[11px] leading-5 text-white/35">
+                          Agora selecione o dia e o horário de retorno.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <p className="mt-4 text-xs leading-5 text-white/35">
@@ -1034,6 +1051,24 @@ export function PublicVehicleCalendar({
             )}
         </div>
       </div>
+
+      {timeSelection && (
+        <TimeSelectionDialog
+          open
+          day={timeSelection.day}
+          mode={timeSelection.mode}
+          intervalMinutes={
+            PUBLIC_TIME_INTERVAL_MINUTES
+          }
+          isTimeDisabled={
+            isTimeDisabled
+          }
+          onClose={() =>
+            setTimeSelection(null)
+          }
+          onConfirm={confirmTime}
+        />
+      )}
     </div>
   );
 }
