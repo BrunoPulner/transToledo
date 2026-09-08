@@ -7,8 +7,10 @@ import {
 
 import {
   Accessibility,
+  ArrowRight,
   BriefcaseBusiness,
   CalendarDays,
+  CalendarRange,
   ChevronDown,
   ChevronUp,
   Maximize2,
@@ -29,7 +31,13 @@ import {
 
 import {
   PublicVehicleCalendar,
+  type VehicleDateSelection,
 } from "./PublicVehicleCalendar";
+
+import {
+  QuoteRequestDialog,
+  type QuoteContactDraft,
+} from "./QuoteRequestDialog";
 
 import type {
   Vehicle,
@@ -102,6 +110,25 @@ export function FleetInformation({
     collapsed,
     setCollapsed,
   ] = useState(false);
+
+  const [
+    selectedPeriod,
+    setSelectedPeriod,
+  ] = useState<VehicleDateSelection | null>(
+    null,
+  );
+
+  const [
+    contactDialogOpen,
+    setContactDialogOpen,
+  ] = useState(false);
+
+  const [
+    contactDraft,
+    setContactDraft,
+  ] = useState<QuoteContactDraft | null>(
+    null,
+  );
 
   const enabledFeatures =
     featureDetails.filter(
@@ -462,7 +489,71 @@ export function FleetInformation({
                   vehicleId={
                     vehicle.id
                   }
+                  onSelectionChange={
+                    setSelectedPeriod
+                  }
                 />
+
+                <div className="mt-3 flex flex-col gap-3 rounded-2xl border border-white/8 bg-white/3 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-yellow-400/10 text-yellow-400">
+                      <CalendarRange size={17} />
+                    </span>
+
+                    <div className="min-w-0">
+                      <p className="text-[9px] font-bold uppercase tracking-[0.13em] text-white/30">
+                        Resumo da solicitação
+                      </p>
+
+                      {selectedPeriod ? (
+                        <p className="mt-1 text-xs leading-5 text-white/70">
+                          <strong className="text-white">
+                            {vehicle.model}
+                          </strong>{" "}
+                          — saída em{" "}
+                          {formatDate(
+                            selectedPeriod.departureDate,
+                          )}{" às "}
+                          {formatTime(
+                            selectedPeriod.departureDate,
+                          )}{" "}
+                          e retorno em{" "}
+                          {formatDate(
+                            selectedPeriod.returnDate,
+                          )}{" às "}
+                          {formatTime(
+                            selectedPeriod.returnDate,
+                          )}.
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-xs leading-5 text-white/35">
+                          Escolha a data de saída e de retorno para continuar.
+                        </p>
+                      )}
+
+                      {contactDraft && (
+                        <p className="mt-1 text-[10px] text-emerald-300/75">
+                          Dados de contato preenchidos para {contactDraft.name}.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={!selectedPeriod}
+                    onClick={() =>
+                      setContactDialogOpen(true)
+                    }
+                    className="group flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-red-600 px-5 text-xs font-bold text-white shadow-lg shadow-red-950/25 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-white/8 disabled:text-white/25 disabled:shadow-none"
+                  >
+                    Solicitar orçamento
+                    <ArrowRight
+                      size={15}
+                      className="transition-transform group-hover:translate-x-0.5"
+                    />
+                  </button>
+                </div>
               </div>
             )}
           </motion.div>
@@ -499,8 +590,45 @@ export function FleetInformation({
           Recolher
         </button>
       )}
+
+      {selectedPeriod && (
+        <QuoteRequestDialog
+          open={contactDialogOpen}
+          vehicle={vehicle}
+          selection={selectedPeriod}
+          initialContact={contactDraft}
+          onClose={() =>
+            setContactDialogOpen(false)
+          }
+          onSave={(contact) => {
+            setContactDraft(contact);
+            setContactDialogOpen(false);
+          }}
+        />
+      )}
     </div>
   );
+}
+
+const publicDateFormatter =
+  new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+
+function formatDate(date: Date) {
+  return publicDateFormatter.format(date);
+}
+
+const publicTimeFormatter =
+  new Intl.DateTimeFormat("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+function formatTime(date: Date) {
+  return publicTimeFormatter.format(date);
 }
 
 type PanelButtonProps = {
