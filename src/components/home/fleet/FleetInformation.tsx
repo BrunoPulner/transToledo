@@ -532,8 +532,8 @@ export function FleetInformation({
                       )}
 
                       {contactDraft && (
-                        <p className="mt-1 text-[10px] text-emerald-300/75">
-                          Dados de contato preenchidos para {contactDraft.name}.
+                        <p className="mt-1 text-[10px] font-medium text-emerald-300/80">
+                          Solicitação enviada com telefone confirmado para {contactDraft.name}.
                         </p>
                       )}
                     </div>
