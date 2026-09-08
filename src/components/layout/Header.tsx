@@ -29,17 +29,17 @@ const navigation = [
   },
   {
     label: "Frota",
-    href: "/frota",
+    href: "/#frota",
     id: "frota",
   },
   {
     label: "Destinos",
-    href: "/destinos",
+    href: "/#destinos",
     id: "destinos",
   },
   {
     label: "Contato",
-    href: "/contato",
+    href: "/#contato",
     id: "contato",
   },
 ];
@@ -159,22 +159,19 @@ export function Header() {
       return;
     }
 
-    const sobreSection =
-      document.getElementById("sobre");
-
-    if (!sobreSection) {
-      return;
-    }
+    const sections = navigation
+      .map((item) => document.getElementById(item.id))
+      .filter((section): section is HTMLElement => Boolean(section));
 
     const handleSectionScroll = () => {
-      const sobreTop =
-        sobreSection.getBoundingClientRect().top;
+      const visibleSection = [...sections]
+        .reverse()
+        .find(
+          (section) =>
+            section.getBoundingClientRect().top <= 180,
+        );
 
-      if (sobreTop <= 180) {
-        setActiveSection("sobre");
-      } else {
-        setActiveSection("inicio");
-      }
+      setActiveSection(visibleSection?.id ?? "inicio");
     };
 
     handleSectionScroll();
@@ -224,11 +221,7 @@ export function Header() {
         return activeSection === "inicio";
       }
 
-      if (id === "sobre") {
-        return activeSection === "sobre";
-      }
-
-      return false;
+      return activeSection === id;
     }
 
     if (href.startsWith("/#")) {

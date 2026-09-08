@@ -12,7 +12,10 @@ import Link from "next/link";
 
 export function HomeHero() {
   return (
-    <section className="relative flex min-h-screen overflow-hidden bg-black">
+    <section
+      id="inicio"
+      className="relative flex min-h-screen scroll-mt-28 overflow-hidden bg-black"
+    >
       {/* BACKGROUND */}
       <div
         className="absolute inset-0 bg-cover bg-center bg-no-repeat"
