@@ -118,7 +118,7 @@ export function HomeHero() {
             className="mt-8 flex flex-col gap-3 sm:flex-row"
           >
             <Link
-              href="/destinos"
+              href="/#destinos"
               className="group flex items-center justify-center gap-3 rounded-full bg-yellow-400 px-7 py-4 text-sm font-bold text-black transition hover:bg-yellow-300"
             >
               Explore nossos destinos
@@ -130,7 +130,7 @@ export function HomeHero() {
             </Link>
 
             <Link
-              href="/frota"
+              href="/#frota"
               className="flex items-center justify-center gap-3 rounded-full border border-white/20 bg-white/5 px-7 py-4 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/10"
             >
               Conheça nossa frota
