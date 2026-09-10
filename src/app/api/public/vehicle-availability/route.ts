@@ -19,6 +19,9 @@ type PublicBusyPeriod = {
 /*
  * GET
  *
+ * Retorna os períodos ocupados
+ * de um veículo.
+ *
  * /api/public/vehicle-availability
  * ?vehicleId=ID_DO_VEICULO
  */
@@ -47,10 +50,13 @@ export async function GET(
   }
 
   /*
-   * Impede parâmetros muito grandes
-   * ou claramente inválidos.
+   * IDs de documentos do Firestore
+   * não podem conter barras.
    */
-  if (vehicleId.length > 128) {
+  if (
+    vehicleId.length > 128 ||
+    vehicleId.includes("/")
+  ) {
     return NextResponse.json(
       {
         success: false,
@@ -66,7 +72,7 @@ export async function GET(
   try {
     /*
      * Confirma que o veículo existe
-     * e está ativo.
+     * e continua ativo.
      */
     const vehicleReference =
       adminDb
@@ -93,8 +99,7 @@ export async function GET(
       vehicleSnapshot.data();
 
     if (
-      vehicleData?.status !==
-      "active"
+      vehicleData?.status !== "active"
     ) {
       return NextResponse.json(
         {
@@ -109,12 +114,12 @@ export async function GET(
     }
 
     /*
-     * Consulta os registros da agenda
-     * vinculados ao veículo.
+     * Consulta os registros vinculados
+     * ao veículo.
      *
-     * O filtro principal utiliza apenas
-     * vehicleId para evitar a necessidade
-     * de vários índices compostos.
+     * O filtro utiliza apenas vehicleId
+     * para não exigir um índice composto
+     * adicional no Firestore.
      */
     const schedulesSnapshot =
       await adminDb
@@ -128,106 +133,114 @@ export async function GET(
         )
         .get();
 
-    const now = new Date();
+    const now =
+      new Date();
 
     const busyPeriods:
-  PublicBusyPeriod[] =
-    schedulesSnapshot.docs
-    .map((document) => {
+      PublicBusyPeriod[] = [];
+
+    /*
+     * Filtra e normaliza os períodos
+     * antes de enviá-los ao cliente.
+     */
+    for (
+      const document
+      of schedulesSnapshot.docs
+    ) {
       const schedule =
         document.data();
 
+      /*
+       * Somente registros ativos
+       * podem ocupar o calendário.
+       */
+      if (
+        schedule.status !== "active"
+      ) {
+        continue;
+      }
+
+      /*
+       * booking:
+       * viagem confirmada.
+       *
+       * blocked:
+       * bloqueio manual do veículo.
+       */
+      if (
+        schedule.type !== "booking" &&
+        schedule.type !== "blocked"
+      ) {
+        continue;
+      }
+
       const startsAt =
-        schedule.startsAt
-          ?.toDate?.();
+        readFirestoreDate(
+          schedule.startsAt,
+        );
 
       const endsAt =
-        schedule.endsAt
-          ?.toDate?.();
+        readFirestoreDate(
+          schedule.endsAt,
+        );
 
-      return {
-        type:
-          schedule.type,
+      /*
+       * Ignora registros com datas
+       * ausentes ou inválidas.
+       */
+      if (
+        !startsAt ||
+        !endsAt ||
+        startsAt >= endsAt
+      ) {
+        continue;
+      }
 
-        status:
-          schedule.status,
+      /*
+       * Períodos totalmente encerrados
+       * não precisam ser enviados para
+       * o calendário público.
+       */
+      if (endsAt <= now) {
+        continue;
+      }
 
+      busyPeriods.push({
         startsAt:
-          startsAt instanceof Date
-            ? startsAt
-            : null,
+          startsAt.toISOString(),
 
         endsAt:
-          endsAt instanceof Date
-            ? endsAt
-            : null,
-      };
-    })
+          endsAt.toISOString(),
 
-    /*
-     * Somente viagens confirmadas
-     * e bloqueios ativos.
-     */
-    .filter(
-      (schedule) =>
-        schedule.status ===
-          "active" &&
-        (schedule.type ===
-          "booking" ||
-          schedule.type ===
-            "blocked"),
-    )
-
-    /*
-     * Confirma que as datas
-     * foram carregadas corretamente.
-     */
-    .filter(
-      (
-        schedule,
-      ): schedule is {
         type:
-          | "booking"
-          | "blocked";
-
-        status: "active";
-
-        startsAt: Date;
-        endsAt: Date;
-      } =>
-        schedule.startsAt instanceof
-  Date &&
-schedule.endsAt instanceof
-  Date &&
-schedule.endsAt > now,
-    )
+          schedule.type,
+      });
+    }
 
     /*
-     * Ordena os períodos.
+     * Mantém os períodos ordenados
+     * pela data de início.
      */
-    .sort(
+    busyPeriods.sort(
       (
-        firstSchedule,
-        secondSchedule,
+        firstPeriod,
+        secondPeriod,
       ) =>
-        firstSchedule.startsAt.getTime() -
-        secondSchedule.startsAt.getTime(),
-    )
+        new Date(
+          firstPeriod.startsAt,
+        ).getTime() -
+        new Date(
+          secondPeriod.startsAt,
+        ).getTime(),
+    );
 
     /*
-     * Resposta pública.
+     * A resposta pública contém apenas
+     * os dados necessários ao calendário.
+     *
+     * Dados do cliente, viagem e informações
+     * administrativas não são expostos.
      */
-    .map((schedule) => ({
-      startsAt:
-        schedule.startsAt.toISOString(),
-
-      endsAt:
-        schedule.endsAt.toISOString(),
-
-      type:
-        schedule.type,
-    }));
-
     return NextResponse.json(
       {
         success: true,
@@ -240,6 +253,12 @@ schedule.endsAt > now,
         headers: {
           "Cache-Control":
             "private, no-store, max-age=0",
+
+          Pragma:
+            "no-cache",
+
+          Expires:
+            "0",
         },
       },
     );
@@ -252,13 +271,85 @@ schedule.endsAt > now,
     return NextResponse.json(
       {
         success: false,
-
         message:
           "Não foi possível consultar a disponibilidade do veículo.",
       },
       {
         status: 500,
+
+        headers: {
+          "Cache-Control":
+            "no-store",
+        },
       },
     );
   }
+}
+
+/*
+ * Converte Timestamp do Firestore
+ * para Date com validação.
+ */
+function readFirestoreDate(
+  value: unknown,
+): Date | null {
+  if (
+    value &&
+    typeof value === "object" &&
+    "toDate" in value &&
+    typeof (
+      value as {
+        toDate?: unknown;
+      }
+    ).toDate === "function"
+  ) {
+    const date = (
+      value as {
+        toDate: () => Date;
+      }
+    ).toDate();
+
+    if (
+      date instanceof Date &&
+      !Number.isNaN(
+        date.getTime(),
+      )
+    ) {
+      return date;
+    }
+  }
+
+  /*
+   * Mantém compatibilidade caso algum
+   * valor já esteja no formato Date.
+   */
+  if (
+    value instanceof Date &&
+    !Number.isNaN(
+      value.getTime(),
+    )
+  ) {
+    return value;
+  }
+
+  /*
+   * Mantém compatibilidade caso algum
+   * registro antigo esteja salvo em ISO.
+   */
+  if (
+    typeof value === "string"
+  ) {
+    const date =
+      new Date(value);
+
+    if (
+      !Number.isNaN(
+        date.getTime(),
+      )
+    ) {
+      return date;
+    }
+  }
+
+  return null;
 }

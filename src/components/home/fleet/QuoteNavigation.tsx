@@ -4,7 +4,8 @@ import {
   ArrowLeft,
   ArrowRight,
   LoaderCircle,
-  MessageCircle,
+  CheckCircle2,
+  Send,
 } from "lucide-react";
 
 import type {
@@ -15,6 +16,7 @@ type QuoteNavigationProps = {
   currentStep: QuoteStep;
   canContinue: boolean;
   isSubmitting?: boolean;
+  submissionComplete?: boolean;
   onBack: () => void;
   onContinue: () => void;
 };
@@ -33,6 +35,7 @@ export function QuoteNavigation({
   currentStep,
   canContinue,
   isSubmitting = false,
+  submissionComplete = false,
   onBack,
   onContinue,
 }: QuoteNavigationProps) {
@@ -93,7 +96,8 @@ export function QuoteNavigation({
           }
         `}
       >
-        {!isFirstStep && (
+        {!isFirstStep &&
+          !submissionComplete && (
           <button
             type="button"
             disabled={isSubmitting}
@@ -130,7 +134,8 @@ export function QuoteNavigation({
           type="button"
           disabled={
             !canContinue ||
-            isSubmitting
+            isSubmitting ||
+            submissionComplete
           }
           onClick={onContinue}
           className={`
@@ -173,7 +178,12 @@ export function QuoteNavigation({
             }
           `}
         >
-          {isSubmitting ? (
+          {submissionComplete ? (
+            <>
+              <CheckCircle2 size={16} />
+              Solicitação enviada
+            </>
+          ) : isSubmitting ? (
             <>
               <LoaderCircle
                 size={16}
@@ -183,7 +193,7 @@ export function QuoteNavigation({
             </>
           ) : isReviewStep ? (
             <>
-              <MessageCircle size={16} />
+              <Send size={16} />
               Enviar orçamento
             </>
           ) : (

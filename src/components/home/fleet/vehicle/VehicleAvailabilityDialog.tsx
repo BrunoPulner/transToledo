@@ -6,6 +6,7 @@ import {
   CalendarRange,
   Check,
   Clock3,
+  LoaderCircle,
   X,
 } from "lucide-react";
 
@@ -30,12 +31,26 @@ import type {
 type VehicleAvailabilityDialogProps = {
   open: boolean;
   vehicle: Vehicle | null;
-  initialSelection?: VehicleDateSelection | null;
+  initialSelection?:
+    VehicleDateSelection | null;
   onClose: () => void;
+
   onConfirm: (
     vehicle: Vehicle,
     selection: VehicleDateSelection,
   ) => void;
+};
+
+type PublicBusyPeriod = {
+  startsAt: string;
+  endsAt: string;
+  type?: "booking" | "blocked";
+};
+
+type AvailabilityResponse = {
+  success?: boolean;
+  message?: string;
+  busyPeriods?: PublicBusyPeriod[];
 };
 
 const dateFormatter =
@@ -60,10 +75,34 @@ export function VehicleAvailabilityDialog({
   const [
     selectedPeriod,
     setSelectedPeriod,
-  ] = useState<VehicleDateSelection | null>(
-    initialSelection,
-  );
+  ] =
+    useState<VehicleDateSelection | null>(
+      initialSelection,
+    );
 
+  const [
+    checkingAvailability,
+    setCheckingAvailability,
+  ] = useState(false);
+
+  const [
+    availabilityError,
+    setAvailabilityError,
+  ] = useState("");
+
+  /*
+   * Usado para forçar o calendário
+   * a consultar novamente a API.
+   */
+  const [
+    availabilityVersion,
+    setAvailabilityVersion,
+  ] = useState(0);
+
+  /*
+   * Restaura a seleção anterior
+   * sempre que o modal for aberto.
+   */
   useEffect(() => {
     if (!open) {
       return;
@@ -79,14 +118,17 @@ export function VehicleAvailabilityDialog({
     vehicle?.id,
   ]);
 
+  /*
+   * Bloqueia o scroll da página
+   * enquanto o modal estiver aberto.
+   */
   useEffect(() => {
     if (!open) {
       return;
     }
 
     const previousOverflow =
-      document.body.style
-        .overflow;
+      document.body.style.overflow;
 
     document.body.style.overflow =
       "hidden";
@@ -129,26 +171,168 @@ export function VehicleAvailabilityDialog({
     return null;
   }
 
-  function confirmPeriod() {
+  /*
+   * Verifica se dois períodos
+   * possuem qualquer interseção.
+   *
+   * É permitido:
+   * - terminar exatamente quando outro começa;
+   * - começar exatamente quando outro termina.
+   */
+  function periodsConflict(
+    selection:
+      VehicleDateSelection,
+    busyPeriod:
+      PublicBusyPeriod,
+  ) {
+    const occupiedStart =
+      new Date(
+        busyPeriod.startsAt,
+      );
+
+    const occupiedEnd =
+      new Date(
+        busyPeriod.endsAt,
+      );
+
+    if (
+      Number.isNaN(
+        occupiedStart.getTime(),
+      ) ||
+      Number.isNaN(
+        occupiedEnd.getTime(),
+      )
+    ) {
+      return false;
+    }
+
+    return (
+      selection.departureDate <
+        occupiedEnd &&
+      selection.returnDate >
+        occupiedStart
+    );
+  }
+
+  /*
+   * Antes de deixar a primeira etapa,
+   * consulta novamente a agenda.
+   *
+   * Isso impede que o cliente avance
+   * caso outro agendamento tenha sido
+   * confirmado enquanto o calendário
+   * estava aberto.
+   */
+  async function confirmPeriod() {
     if (
       !vehicle ||
-      !selectedPeriod
+      !selectedPeriod ||
+      checkingAvailability
     ) {
       return;
     }
 
-    onConfirm(
-      vehicle,
-      selectedPeriod,
-    );
+    setCheckingAvailability(true);
+    setAvailabilityError("");
+
+    try {
+      const response = await fetch(
+        `/api/public/vehicle-availability?vehicleId=${encodeURIComponent(
+          vehicle.id,
+        )}`,
+        {
+          cache: "no-store",
+        },
+      );
+
+      const contentType =
+        response.headers.get(
+          "content-type",
+        );
+
+      if (
+        !contentType?.includes(
+          "application/json",
+        )
+      ) {
+        throw new Error(
+          "A consulta da agenda retornou uma resposta inválida.",
+        );
+      }
+
+      const result =
+        (await response.json()) as
+          AvailabilityResponse;
+
+      if (
+        !response.ok ||
+        !result.success
+      ) {
+        throw new Error(
+          result.message ??
+            "Não foi possível confirmar a disponibilidade.",
+        );
+      }
+
+      const hasConflict =
+        (
+          result.busyPeriods ??
+          []
+        ).some(
+          (busyPeriod) =>
+            periodsConflict(
+              selectedPeriod,
+              busyPeriod,
+            ),
+        );
+
+      /*
+       * Se o período ficou ocupado,
+       * apaga a seleção e recarrega
+       * a agenda imediatamente.
+       */
+      if (hasConflict) {
+        setSelectedPeriod(
+          null,
+        );
+
+        setAvailabilityVersion(
+          (currentVersion) =>
+            currentVersion + 1,
+        );
+
+        setAvailabilityError(
+          "Este período acabou de ficar ocupado. A agenda foi atualizada; escolha um novo horário.",
+        );
+
+        return;
+      }
+
+      /*
+       * Só confirma depois da
+       * verificação mais recente.
+       */
+      onConfirm(
+        vehicle,
+        selectedPeriod,
+      );
+    } catch (error) {
+      setAvailabilityError(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível confirmar a disponibilidade.",
+      );
+    } finally {
+      setCheckingAvailability(
+        false,
+      );
+    }
   }
 
   return createPortal(
     <div
       role="presentation"
-      onMouseDown={(
-        event,
-      ) => {
+      onMouseDown={(event) => {
         if (
           event.target ===
           event.currentTarget
@@ -203,7 +387,14 @@ export function VehicleAvailabilityDialog({
             sm:px-6
           "
         >
-          <div className="flex min-w-0 items-start gap-3">
+          <div
+            className="
+              flex
+              min-w-0
+              items-start
+              gap-3
+            "
+          >
             <span
               className="
                 flex
@@ -261,7 +452,9 @@ export function VehicleAvailabilityDialog({
               >
                 <BusFront
                   size={13}
-                  className="text-yellow-400"
+                  className="
+                    text-yellow-400
+                  "
                 />
 
                 {vehicle.model}
@@ -271,9 +464,7 @@ export function VehicleAvailabilityDialog({
 
           <button
             type="button"
-            onClick={
-              onClose
-            }
+            onClick={onClose}
             aria-label="Fechar agenda"
             className="
               flex
@@ -304,6 +495,9 @@ export function VehicleAvailabilityDialog({
             sm:p-5
           "
         >
+          {/*
+           * Legenda do calendário.
+           */}
           <div
             className="
               mb-4
@@ -313,31 +507,55 @@ export function VehicleAvailabilityDialog({
             "
           >
             <LegendItem
-              color="bg-emerald-400"
+              color="
+                bg-emerald-400
+              "
               label="Disponível"
             />
 
             <LegendItem
-              color="bg-red-500"
+              color="
+                bg-red-500
+              "
               label="Ocupado"
             />
 
             <LegendItem
-              color="bg-amber-400"
+              color="
+                bg-amber-400
+              "
               label="Parcialmente ocupado"
             />
           </div>
 
+          {/*
+           * Quando availabilityVersion
+           * muda, o calendário é recriado
+           * e consulta a agenda novamente.
+           */}
           <PublicVehicleCalendar
-            key={vehicle.id}
+            key={`${vehicle.id}-${availabilityVersion}`}
             vehicleId={
               vehicle.id
             }
-            onSelectionChange={
-              setSelectedPeriod
-            }
+            onSelectionChange={(
+              selection,
+            ) => {
+              setSelectedPeriod(
+                selection,
+              );
+
+              if (selection) {
+                setAvailabilityError(
+                  "",
+                );
+              }
+            }}
           />
 
+          {/*
+           * Resumo do período escolhido.
+           */}
           <div
             className={`
               mt-4
@@ -357,7 +575,13 @@ export function VehicleAvailabilityDialog({
               }
             `}
           >
-            <div className="flex items-start gap-3">
+            <div
+              className="
+                flex
+                items-start
+                gap-3
+              "
+            >
               <span
                 className={`
                   flex
@@ -390,7 +614,7 @@ export function VehicleAvailabilityDialog({
                 )}
               </span>
 
-              <div>
+              <div className="min-w-0">
                 <p
                   className="
                     text-[10px]
@@ -465,10 +689,31 @@ export function VehicleAvailabilityDialog({
             sm:px-6
           "
         >
+          {availabilityError && (
+            <p
+              className="
+                rounded-lg
+                border
+                border-red-400/15
+                bg-red-400/8
+                px-3
+                py-2
+                text-[11px]
+                leading-5
+                text-red-300
+                sm:mr-auto
+                sm:max-w-md
+              "
+            >
+              {availabilityError}
+            </p>
+          )}
+
           <button
             type="button"
-            onClick={
-              onClose
+            onClick={onClose}
+            disabled={
+              checkingAvailability
             }
             className="
               flex
@@ -486,6 +731,8 @@ export function VehicleAvailabilityDialog({
               transition
               hover:border-white/20
               hover:text-white
+              disabled:cursor-not-allowed
+              disabled:opacity-40
             "
           >
             Cancelar
@@ -494,11 +741,12 @@ export function VehicleAvailabilityDialog({
           <button
             type="button"
             disabled={
-              !selectedPeriod
+              !selectedPeriod ||
+              checkingAvailability
             }
-            onClick={
-              confirmPeriod
-            }
+            onClick={() => {
+              void confirmPeriod();
+            }}
             className="
               flex
               h-11
@@ -518,11 +766,22 @@ export function VehicleAvailabilityDialog({
               disabled:text-white/25
             "
           >
-            <CalendarCheck
-              size={16}
-            />
+            {checkingAvailability ? (
+              <LoaderCircle
+                size={16}
+                className="
+                  animate-spin
+                "
+              />
+            ) : (
+              <CalendarCheck
+                size={16}
+              />
+            )}
 
-            Confirmar período
+            {checkingAvailability
+              ? "Verificando..."
+              : "Confirmar período"}
           </button>
         </footer>
       </div>
@@ -610,7 +869,9 @@ function PeriodItem({
       >
         <Clock3
           size={11}
-          className="text-yellow-400"
+          className="
+            text-yellow-400
+          "
         />
 
         {label}

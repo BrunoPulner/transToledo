@@ -37,6 +37,11 @@ type BusyPeriod = {
   type: "booking" | "blocked";
 };
 
+type DayAvailability =
+  | "available"
+  | "partial"
+  | "occupied";
+
 const weekDays = [
   "Dom",
   "Seg",
@@ -49,10 +54,12 @@ const weekDays = [
 
 /*
  * Intervalo público padrão.
- * Depois este valor poderá vir das
- * configurações cadastradas pelo admin.
+ *
+ * Posteriormente este valor poderá
+ * vir das configurações do admin.
  */
-const PUBLIC_TIME_INTERVAL_MINUTES = 30;
+const PUBLIC_TIME_INTERVAL_MINUTES =
+  30;
 
 const monthFormatter =
   new Intl.DateTimeFormat(
@@ -82,6 +89,9 @@ const timeFormatter =
     },
   );
 
+/*
+ * Retorna o início do dia.
+ */
 function startOfDay(
   date: Date,
 ) {
@@ -96,6 +106,27 @@ function startOfDay(
   );
 }
 
+/*
+ * Retorna o início do mês.
+ */
+function startOfMonth(
+  date: Date,
+) {
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    1,
+    0,
+    0,
+    0,
+    0,
+  );
+}
+
+/*
+ * Verifica se duas datas pertencem
+ * ao mesmo dia.
+ */
 function isSameDay(
   firstDate: Date,
   secondDate: Date,
@@ -110,6 +141,10 @@ function isSameDay(
   );
 }
 
+/*
+ * Verifica se a data está antes
+ * do dia atual.
+ */
 function isBeforeToday(
   date: Date,
 ) {
@@ -121,6 +156,10 @@ function isBeforeToday(
   );
 }
 
+/*
+ * Verifica se o dia está dentro
+ * do período selecionado.
+ */
 function isDateInsideRange(
   date: Date,
   startDate: Date,
@@ -147,6 +186,10 @@ function isDateInsideRange(
   );
 }
 
+/*
+ * Retorna os períodos ocupados
+ * que atravessam determinado dia.
+ */
 function getPeriodsForDay(
   periods: BusyPeriod[],
   day: Date,
@@ -177,6 +220,17 @@ function getPeriodsForDay(
           period.endsAt,
         );
 
+      if (
+        Number.isNaN(
+          startsAt.getTime(),
+        ) ||
+        Number.isNaN(
+          endsAt.getTime(),
+        )
+      ) {
+        return false;
+      }
+
       return (
         startsAt < dayEnd &&
         endsAt > dayStart
@@ -185,47 +239,293 @@ function getPeriodsForDay(
   );
 }
 
+/*
+ * Identifica se um dia está:
+ *
+ * available:
+ * nenhum horário ocupado.
+ *
+ * partial:
+ * possui horários ocupados e disponíveis.
+ *
+ * occupied:
+ * o dia inteiro está ocupado.
+ */
+function getDayAvailability(
+  periods: BusyPeriod[],
+  day: Date,
+): DayAvailability {
+  const dayStart =
+    startOfDay(day);
+
+  const dayEnd =
+    new Date(
+      day.getFullYear(),
+      day.getMonth(),
+      day.getDate() + 1,
+      0,
+      0,
+      0,
+      0,
+    );
+
+  const intervals =
+    getPeriodsForDay(
+      periods,
+      day,
+    )
+      .map((period) => {
+        const periodStart =
+          new Date(
+            period.startsAt,
+          );
+
+        const periodEnd =
+          new Date(
+            period.endsAt,
+          );
+
+        return {
+          start: Math.max(
+            periodStart.getTime(),
+            dayStart.getTime(),
+          ),
+
+          end: Math.min(
+            periodEnd.getTime(),
+            dayEnd.getTime(),
+          ),
+        };
+      })
+      .filter(
+        (interval) =>
+          interval.start <
+          interval.end,
+      )
+      .sort(
+        (
+          firstInterval,
+          secondInterval,
+        ) =>
+          firstInterval.start -
+          secondInterval.start,
+      );
+
+  if (
+    intervals.length === 0
+  ) {
+    return "available";
+  }
+
+  /*
+   * Junta períodos que se sobrepõem.
+   *
+   * Isso permite identificar corretamente
+   * um dia totalmente ocupado mesmo que
+   * existam vários agendamentos.
+   */
+  const mergedIntervals: Array<{
+    start: number;
+    end: number;
+  }> = [];
+
+  for (
+    const interval
+    of intervals
+  ) {
+    const previousInterval =
+      mergedIntervals[
+        mergedIntervals.length - 1
+      ];
+
+    if (
+      !previousInterval ||
+      interval.start >
+        previousInterval.end
+    ) {
+      mergedIntervals.push({
+        ...interval,
+      });
+
+      continue;
+    }
+
+    previousInterval.end =
+      Math.max(
+        previousInterval.end,
+        interval.end,
+      );
+  }
+
+  const occupiedMilliseconds =
+    mergedIntervals.reduce(
+      (
+        total,
+        interval,
+      ) =>
+        total +
+        (
+          interval.end -
+          interval.start
+        ),
+      0,
+    );
+
+  const completeDayMilliseconds =
+    dayEnd.getTime() -
+    dayStart.getTime();
+
+  if (
+    occupiedMilliseconds >=
+    completeDayMilliseconds
+  ) {
+    return "occupied";
+  }
+
+  return "partial";
+}
+
+/*
+ * Verifica se um intervalo atravessa
+ * algum período ocupado.
+ */
 function rangeHasConflict(
   startDate: Date,
   endDate: Date,
   periods: BusyPeriod[],
 ) {
-  return periods.some((period) => {
-    const periodStart = new Date(
-      period.startsAt,
-    );
-    const periodEnd = new Date(
-      period.endsAt,
-    );
+  return periods.some(
+    (period) => {
+      const periodStart =
+        new Date(
+          period.startsAt,
+        );
 
-    return (
-      startDate < periodEnd &&
-      endDate > periodStart
-    );
-  });
+      const periodEnd =
+        new Date(
+          period.endsAt,
+        );
+
+      if (
+        Number.isNaN(
+          periodStart.getTime(),
+        ) ||
+        Number.isNaN(
+          periodEnd.getTime(),
+        )
+      ) {
+        return false;
+      }
+
+      return (
+        startDate < periodEnd &&
+        endDate > periodStart
+      );
+    },
+  );
+}
+
+/*
+ * Valida os períodos recebidos
+ * da API pública.
+ */
+function readBusyPeriods(
+  value: unknown,
+): BusyPeriod[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap(
+    (item): BusyPeriod[] => {
+      if (
+        !item ||
+        typeof item !== "object"
+      ) {
+        return [];
+      }
+
+      const period =
+        item as {
+          startsAt?: unknown;
+          endsAt?: unknown;
+          type?: unknown;
+        };
+
+      if (
+        typeof period.startsAt !==
+          "string" ||
+        typeof period.endsAt !==
+          "string" ||
+        (
+          period.type !== "booking" &&
+          period.type !== "blocked"
+        )
+      ) {
+        return [];
+      }
+
+      const startsAt =
+        new Date(
+          period.startsAt,
+        );
+
+      const endsAt =
+        new Date(
+          period.endsAt,
+        );
+
+      if (
+        Number.isNaN(
+          startsAt.getTime(),
+        ) ||
+        Number.isNaN(
+          endsAt.getTime(),
+        ) ||
+        startsAt >= endsAt
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          startsAt:
+            startsAt.toISOString(),
+
+          endsAt:
+            endsAt.toISOString(),
+
+          type:
+            period.type,
+        },
+      ];
+    },
+  );
 }
 
 export function PublicVehicleCalendar({
   vehicleId,
   onSelectionChange,
 }: PublicVehicleCalendarProps) {
-  const today = new Date();
+  const today =
+    new Date();
+
+  const currentMonth =
+    startOfMonth(today);
 
   const [
     displayedMonth,
     setDisplayedMonth,
   ] = useState(
     () =>
-      new Date(
-        today.getFullYear(),
-        today.getMonth(),
-        1,
+      startOfMonth(
+        today,
       ),
   );
 
   /*
-   * Dia ocupado selecionado apenas
-   * para consultar os horários.
+   * Dia selecionado para visualizar
+   * seus horários ocupados.
    */
   const [
     inspectionDay,
@@ -261,7 +561,9 @@ export function PublicVehicleCalendar({
     setTimeSelection,
   ] = useState<{
     day: Date;
-    mode: "departure" | "return";
+    mode:
+      | "departure"
+      | "return";
   } | null>(null);
 
   const [
@@ -287,6 +589,14 @@ export function PublicVehicleCalendar({
   ] = useState("");
 
   /*
+   * Impede navegação para meses
+   * anteriores ao mês atual.
+   */
+  const canGoToPreviousMonth =
+    displayedMonth.getTime() >
+    currentMonth.getTime();
+
+  /*
    * Consulta a agenda pública
    * do veículo selecionado.
    */
@@ -298,6 +608,7 @@ export function PublicVehicleCalendar({
       try {
         setLoading(true);
         setError("");
+        setBusyPeriods([]);
         setSelectionError("");
         setInspectionDay(null);
         setDepartureDate(null);
@@ -311,30 +622,42 @@ export function PublicVehicleCalendar({
               vehicleId,
             )}`,
             {
+              method: "GET",
               cache: "no-store",
+
               signal:
                 controller.signal,
             },
           );
 
-        if (!response.ok) {
+        const data =
+          (await response.json()) as {
+            success?: boolean;
+            message?: string;
+            busyPeriods?: unknown;
+          };
+
+        if (
+          !response.ok ||
+          data.success !== true
+        ) {
           throw new Error(
-            "Não foi possível carregar a agenda.",
+            typeof data.message ===
+              "string"
+              ? data.message
+              : "Não foi possível carregar a agenda.",
           );
         }
 
-        const data =
-          (await response.json()) as {
-            busyPeriods?: BusyPeriod[];
-          };
-
         setBusyPeriods(
-          data.busyPeriods ?? [],
+          readBusyPeriods(
+            data.busyPeriods,
+          ),
         );
       } catch (loadError) {
         if (
           loadError instanceof
-            DOMException &&
+            Error &&
           loadError.name ===
             "AbortError"
         ) {
@@ -346,8 +669,12 @@ export function PublicVehicleCalendar({
           loadError,
         );
 
+        setBusyPeriods([]);
+
         setError(
-          "Não foi possível carregar a agenda.",
+          loadError instanceof Error
+            ? loadError.message
+            : "Não foi possível carregar a agenda.",
         );
       } finally {
         if (
@@ -393,14 +720,17 @@ export function PublicVehicleCalendar({
 
       const requiredCells =
         Math.ceil(
-          (firstWeekday +
-            numberOfDays) /
+          (
+            firstWeekday +
+            numberOfDays
+          ) /
             7,
         ) * 7;
 
       return Array.from(
         {
-          length: requiredCells,
+          length:
+            requiredCells,
         },
         (_, index) => {
           const dayNumber =
@@ -423,8 +753,14 @@ export function PublicVehicleCalendar({
           );
         },
       );
-    }, [displayedMonth]);
+    }, [
+      displayedMonth,
+    ]);
 
+  /*
+   * Ocupações do dia atualmente
+   * selecionado.
+   */
   const inspectionPeriods =
     inspectionDay
       ? getPeriodsForDay(
@@ -433,13 +769,21 @@ export function PublicVehicleCalendar({
         )
       : [];
 
+  /*
+   * Navega para o mês anterior.
+   */
   function previousMonth() {
+    if (
+      !canGoToPreviousMonth
+    ) {
+      return;
+    }
+
     setDisplayedMonth(
-      (currentMonth) =>
+      (month) =>
         new Date(
-          currentMonth.getFullYear(),
-          currentMonth.getMonth() -
-            1,
+          month.getFullYear(),
+          month.getMonth() - 1,
           1,
         ),
     );
@@ -448,35 +792,54 @@ export function PublicVehicleCalendar({
     setTimeSelection(null);
   }
 
+  /*
+   * Navega para o próximo mês.
+   */
   function nextMonth() {
     setDisplayedMonth(
-      (currentMonth) =>
+      (month) =>
         new Date(
-          currentMonth.getFullYear(),
-          currentMonth.getMonth() +
-            1,
+          month.getFullYear(),
+          month.getMonth() + 1,
           1,
         ),
     );
 
     setInspectionDay(null);
+    setTimeSelection(null);
   }
 
+  /*
+   * Limpa completamente o período
+   * selecionado pelo cliente.
+   */
   function clearSelection() {
     setDepartureDate(null);
     setReturnDate(null);
     setSelectionFinished(false);
     setSelectionError("");
     setInspectionDay(null);
+    setTimeSelection(null);
 
     onSelectionChange?.(
       null,
     );
   }
 
+  /*
+   * Inicia a seleção de saída
+   * ou retorno.
+   */
   function selectTravelDate(
     day: Date,
   ) {
+    if (
+      loading ||
+      error
+    ) {
+      return;
+    }
+
     if (
       isBeforeToday(day)
     ) {
@@ -488,7 +851,26 @@ export function PublicVehicleCalendar({
     }
 
     setInspectionDay(day);
-    setSelectionError("");
+setSelectionError("");
+
+const dayAvailability =
+  getDayAvailability(
+    busyPeriods,
+    day,
+  );
+
+if (
+  dayAvailability ===
+  "occupied"
+) {
+  setTimeSelection(null);
+
+  setSelectionError(
+    "Este dia está totalmente ocupado por outra viagem.",
+  );
+
+  return;
+}
 
     /*
      * Primeira seleção ou começo
@@ -511,8 +893,12 @@ export function PublicVehicleCalendar({
      * inicia uma nova seleção.
      */
     if (
-      startOfDay(day).getTime() <
-      startOfDay(departureDate).getTime()
+      startOfDay(
+        day,
+      ).getTime() <
+      startOfDay(
+        departureDate,
+      ).getTime()
     ) {
       setTimeSelection({
         day,
@@ -528,29 +914,74 @@ export function PublicVehicleCalendar({
     });
   }
 
-  function confirmTime(date: Date) {
+  /*
+   * Confirma o horário selecionado
+   * no TimeSelectionDialog.
+   */
+  function confirmTime(
+    date: Date,
+  ) {
     if (!timeSelection) {
       return;
     }
 
-    if (timeSelection.mode === "departure") {
-      setDepartureDate(date);
-      setReturnDate(null);
-      setSelectionFinished(false);
-      setSelectionError("");
-      setTimeSelection(null);
-      onSelectionChange?.(null);
+    /*
+     * Define a data e o horário
+     * de saída.
+     */
+    if (
+      timeSelection.mode ===
+      "departure"
+    ) {
+      setDepartureDate(
+        date,
+      );
+
+      setReturnDate(
+        null,
+      );
+
+      setSelectionFinished(
+        false,
+      );
+
+      setSelectionError(
+        "",
+      );
+
+      setTimeSelection(
+        null,
+      );
+
+      onSelectionChange?.(
+        null,
+      );
+
       return;
     }
 
-    if (!departureDate || date <= departureDate) {
+    /*
+     * Valida o retorno.
+     */
+    if (
+      !departureDate ||
+      date <= departureDate
+    ) {
       setSelectionError(
         "O retorno deve acontecer depois da saída.",
       );
-      setTimeSelection(null);
+
+      setTimeSelection(
+        null,
+      );
+
       return;
     }
 
+    /*
+     * Valida todo o período entre
+     * a saída e o retorno.
+     */
     if (
       rangeHasConflict(
         departureDate,
@@ -561,27 +992,57 @@ export function PublicVehicleCalendar({
       setSelectionError(
         "Já existe um agendamento ou bloqueio dentro deste período.",
       );
-      setTimeSelection(null);
+
+      setTimeSelection(
+        null,
+      );
+
       return;
     }
 
-    setReturnDate(date);
-    setSelectionFinished(true);
-    setSelectionError("");
-    setTimeSelection(null);
+    setReturnDate(
+      date,
+    );
+
+    setSelectionFinished(
+      true,
+    );
+
+    setSelectionError(
+      "",
+    );
+
+    setTimeSelection(
+      null,
+    );
+
     onSelectionChange?.({
       departureDate,
-      returnDate: date,
+      returnDate:
+        date,
     });
   }
 
-  function isTimeDisabled(date: Date) {
-    if (date <= new Date()) {
+  /*
+   * Informa ao seletor de horário
+   * quais horários não podem ser usados.
+   */
+  function isTimeDisabled(
+    date: Date,
+  ) {
+    if (
+      date <= new Date()
+    ) {
       return true;
     }
 
+    /*
+     * No retorno, também valida todo
+     * o período desde a saída.
+     */
     if (
-      timeSelection?.mode === "return" &&
+      timeSelection?.mode ===
+        "return" &&
       departureDate
     ) {
       return (
@@ -594,19 +1055,28 @@ export function PublicVehicleCalendar({
       );
     }
 
-    return busyPeriods.some((period) => {
-      const startsAt = new Date(
-        period.startsAt,
-      );
-      const endsAt = new Date(
-        period.endsAt,
-      );
+    /*
+     * Na saída, bloqueia somente os
+     * horários que estão ocupados.
+     */
+    return busyPeriods.some(
+      (period) => {
+        const startsAt =
+          new Date(
+            period.startsAt,
+          );
 
-      return (
-        date >= startsAt &&
-        date < endsAt
-      );
-    });
+        const endsAt =
+          new Date(
+            period.endsAt,
+          );
+
+        return (
+          date >= startsAt &&
+          date < endsAt
+        );
+      },
+    );
   }
 
   return (
@@ -620,6 +1090,9 @@ export function PublicVehicleCalendar({
               type="button"
               onClick={
                 previousMonth
+              }
+              disabled={
+                !canGoToPreviousMonth
               }
               aria-label="Mês anterior"
               className="
@@ -636,6 +1109,10 @@ export function PublicVehicleCalendar({
                 transition
                 hover:border-yellow-400/40
                 hover:text-yellow-400
+                disabled:cursor-not-allowed
+                disabled:opacity-25
+                disabled:hover:border-white/10
+                disabled:hover:text-white/60
                 sm:size-9
               "
             >
@@ -729,29 +1206,24 @@ export function PublicVehicleCalendar({
                   );
                 }
 
-                const periods =
-                  getPeriodsForDay(
-                    busyPeriods,
-                    day,
-                  );
+                /*
+                 * booking possui prioridade visual
+                 * quando existirem tipos diferentes
+                 * no mesmo dia.
+                 */
+                const dayAvailability =
+  getDayAvailability(
+    busyPeriods,
+    day,
+  );
 
-                const booked =
-                  periods.some(
-                    (period) =>
-                      period.type ===
-                      "booking",
-                  );
+const occupied =
+  dayAvailability ===
+  "occupied";
 
-                const blocked =
-                  periods.some(
-                    (period) =>
-                      period.type ===
-                      "blocked",
-                  );
-
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                const occupied =
-                  booked || blocked;
+const partiallyOccupied =
+  dayAvailability ===
+  "partial";
 
                 const past =
                   isBeforeToday(
@@ -790,6 +1262,13 @@ export function PublicVehicleCalendar({
                       )
                     : false;
 
+                const disabled =
+                  past ||
+                  loading ||
+                  Boolean(
+                    error,
+                  );
+
                 return (
                   <button
                     key={
@@ -797,7 +1276,7 @@ export function PublicVehicleCalendar({
                     }
                     type="button"
                     disabled={
-                      past
+                      disabled
                     }
                     onClick={() =>
                       selectTravelDate(
@@ -805,22 +1284,22 @@ export function PublicVehicleCalendar({
                       )
                     }
                     aria-label={
-                      past
-                        ? `${dayFormatter.format(
-                            day,
-                          )}, data anterior`
-                        : booked
-                          ? `${dayFormatter.format(
-                              day,
-                            )}, viagem agendada`
-                          : blocked
-                            ? `${dayFormatter.format(
-                                day,
-                              )}, veículo bloqueado`
-                            : `${dayFormatter.format(
-                                day,
-                              )}, disponível`
-                    }
+  past
+    ? `${dayFormatter.format(
+        day,
+      )}, data anterior`
+    : occupied
+      ? `${dayFormatter.format(
+          day,
+        )}, totalmente ocupado`
+      : partiallyOccupied
+        ? `${dayFormatter.format(
+            day,
+          )}, parcialmente ocupado`
+        : `${dayFormatter.format(
+            day,
+          )}, disponível`
+}
                     className={`
                       relative
                       flex
@@ -839,20 +1318,20 @@ export function PublicVehicleCalendar({
                       ${
                         departure &&
                         returnDay
-                          ? "z-10 border-blue-300 bg-blue-500 text-white ring-2 ring-blue-400/30"
+                          ? "z-10 border-blue-300 bg-linear-to-r from-blue-500 to-violet-500 text-white ring-2 ring-blue-400/30"
                           : departure
                             ? "z-10 border-blue-300 bg-blue-500 text-white ring-2 ring-blue-400/30"
                             : returnDay
                               ? "z-10 border-violet-300 bg-violet-500 text-white ring-2 ring-violet-400/30"
                               : insideSelection
                                 ? "border-blue-400/20 bg-blue-400/20 text-blue-100"
-                                : booked
-                                  ? "cursor-pointer border-red-400/20 bg-red-500/20 text-red-300 hover:bg-red-500/30"
-                                  : blocked
-                                    ? "cursor-pointer border-amber-400/20 bg-amber-400/20 text-amber-200 hover:bg-amber-400/30"
-                                    : past
-                                      ? "cursor-not-allowed border-transparent bg-white/2 text-white/15"
-                                      : "cursor-pointer border-emerald-400/15 bg-emerald-400/8 text-emerald-200 hover:border-emerald-400/40 hover:bg-emerald-400/15"
+                                : occupied
+  ? "border-red-400/30 bg-red-500/25 text-red-200 hover:bg-red-500/35"
+  : partiallyOccupied
+    ? "border-amber-400/30 bg-amber-400/20 text-amber-200 hover:bg-amber-400/30"
+    : past
+                                      ? "border-transparent bg-white/2 text-white/15"
+                                      : "border-emerald-400/15 bg-emerald-400/8 text-emerald-200 hover:border-emerald-400/40 hover:bg-emerald-400/15"
                       }
 
                       ${
@@ -861,6 +1340,12 @@ export function PublicVehicleCalendar({
                         !returnDay
                           ? "ring-2 ring-inset ring-cyan-400"
                           : ""
+                      }
+
+                      ${
+                        disabled
+                          ? "cursor-not-allowed"
+                          : "cursor-pointer"
                       }
                     `}
                   >
@@ -879,14 +1364,14 @@ export function PublicVehicleCalendar({
             />
 
             <Legend
-              color="bg-red-400"
-              label="Agendado"
-            />
+  color="bg-red-400"
+  label="Ocupado"
+/>
 
-            <Legend
-              color="bg-amber-400"
-              label="Bloqueado"
-            />
+<Legend
+  color="bg-amber-400"
+  label="Parcialmente ocupado"
+/>
 
             <Legend
               color="border border-cyan-400"
@@ -936,14 +1421,22 @@ export function PublicVehicleCalendar({
                   <div className="mt-3 space-y-2">
                     <DateInformation
                       label="Saída"
-                      value={`${dayFormatter.format(departureDate)} às ${timeFormatter.format(departureDate)}`}
+                      value={`${dayFormatter.format(
+                        departureDate,
+                      )} às ${timeFormatter.format(
+                        departureDate,
+                      )}`}
                       color="blue"
                     />
 
                     {returnDate ? (
                       <DateInformation
                         label="Retorno"
-                        value={`${dayFormatter.format(returnDate)} às ${timeFormatter.format(returnDate)}`}
+                        value={`${dayFormatter.format(
+                          returnDate,
+                        )} às ${timeFormatter.format(
+                          returnDate,
+                        )}`}
                         color="violet"
                       />
                     ) : (
@@ -951,17 +1444,18 @@ export function PublicVehicleCalendar({
                         <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-violet-300/60">
                           Retorno
                         </p>
+
                         <p className="mt-1 text-[11px] leading-5 text-white/35">
-                          Agora selecione o dia e o horário de retorno.
+                          Agora selecione o dia e o
+                          horário de retorno.
                         </p>
                       </div>
                     )}
                   </div>
                 ) : (
                   <p className="mt-4 text-xs leading-5 text-white/35">
-                    Selecione uma data
-                    disponível para
-                    definir a saída.
+                    Selecione uma data disponível
+                    para definir a saída.
                   </p>
                 )}
 
@@ -992,12 +1486,17 @@ export function PublicVehicleCalendar({
                   inspectionPeriods.length >
                     0 && (
                     <div className="mt-4 border-t border-white/8 pt-3">
-                      <p className="text-[9px] font-bold uppercase tracking-[0.13em] text-white/30">
-                        Ocupações em{" "}
-                        {dayFormatter.format(
-                          inspectionDay,
-                        )}
-                      </p>
+                      <div>
+  <p className="text-[9px] font-bold uppercase tracking-[0.13em] text-white/30">
+    Disponibilidade em
+  </p>
+
+  <p className="mt-1 text-xs font-semibold text-white/70">
+    {dayFormatter.format(
+      inspectionDay,
+    )}
+  </p>
+</div>
 
                       <div className="mt-2 max-h-32 space-y-2 overflow-y-auto pr-1">
                         {inspectionPeriods.map(
@@ -1006,42 +1505,88 @@ export function PublicVehicleCalendar({
                             index,
                           ) => (
                             <div
-                              key={`${period.startsAt}-${period.endsAt}-${index}`}
-                              className={`rounded-lg border px-3 py-2 ${
-                                period.type ===
-                                "booking"
-                                  ? "border-red-400/10 bg-red-400/8"
-                                  : "border-amber-400/10 bg-amber-400/8"
-                              }`}
-                            >
-                              <p
-                                className={`text-[9px] font-semibold uppercase ${
-                                  period.type ===
-                                  "booking"
-                                    ? "text-red-300"
-                                    : "text-amber-300"
-                                }`}
-                              >
-                                {period.type ===
-                                "booking"
-                                  ? "Agendado"
-                                  : "Bloqueado"}
-                              </p>
+  key={`${period.startsAt}-${period.endsAt}-${index}`}
+  className={`rounded-xl border p-3 ${
+    period.type === "booking"
+      ? "border-red-400/20 bg-red-400/8"
+      : "border-amber-400/20 bg-amber-400/8"
+  }`}
+>
+  <div className="flex items-center justify-between gap-2">
+    <p
+      className={`text-[9px] font-bold uppercase tracking-[0.12em] ${
+        period.type === "booking"
+          ? "text-red-300"
+          : "text-amber-300"
+      }`}
+    >
+      {period.type === "booking"
+        ? "Período já agendado"
+        : "Veículo indisponível"}
+    </p>
 
-                              <p className="mt-1 text-xs font-semibold text-white/70">
-                                {timeFormatter.format(
-                                  new Date(
-                                    period.startsAt,
-                                  ),
-                                )}
-                                {" até "}
-                                {timeFormatter.format(
-                                  new Date(
-                                    period.endsAt,
-                                  ),
-                                )}
-                              </p>
-                            </div>
+    <span
+      className={`size-2 shrink-0 rounded-full ${
+        period.type === "booking"
+          ? "bg-red-400"
+          : "bg-amber-400"
+      }`}
+    />
+  </div>
+
+  <div className="mt-3 grid gap-2">
+    <div className="rounded-lg border border-white/8 bg-black/10 px-3 py-2">
+      <p className="text-[8px] font-bold uppercase tracking-[0.12em] text-white/30">
+        Início
+      </p>
+
+      <p className="mt-1 text-[11px] font-semibold text-white/75">
+        {dayFormatter.format(
+          new Date(
+            period.startsAt,
+          ),
+        )}
+
+        {" às "}
+
+        {timeFormatter.format(
+          new Date(
+            period.startsAt,
+          ),
+        )}
+      </p>
+    </div>
+
+    <div className="rounded-lg border border-white/8 bg-black/10 px-3 py-2">
+      <p className="text-[8px] font-bold uppercase tracking-[0.12em] text-white/30">
+        Término
+      </p>
+
+      <p className="mt-1 text-[11px] font-semibold text-white/75">
+        {dayFormatter.format(
+          new Date(
+            period.endsAt,
+          ),
+        )}
+
+        {" às "}
+
+        {timeFormatter.format(
+          new Date(
+            period.endsAt,
+          ),
+        )}
+      </p>
+    </div>
+  </div>
+
+  {period.type === "booking" && (
+    <p className="mt-3 text-[10px] leading-4 text-white/35">
+      Este período já está reservado para
+      outro cliente.
+    </p>
+  )}
+</div>
                           ),
                         )}
                       </div>
@@ -1055,8 +1600,12 @@ export function PublicVehicleCalendar({
       {timeSelection && (
         <TimeSelectionDialog
           open
-          day={timeSelection.day}
-          mode={timeSelection.mode}
+          day={
+            timeSelection.day
+          }
+          mode={
+            timeSelection.mode
+          }
           intervalMinutes={
             PUBLIC_TIME_INTERVAL_MINUTES
           }
@@ -1064,9 +1613,13 @@ export function PublicVehicleCalendar({
             isTimeDisabled
           }
           onClose={() =>
-            setTimeSelection(null)
+            setTimeSelection(
+              null,
+            )
           }
-          onConfirm={confirmTime}
+          onConfirm={
+            confirmTime
+          }
         />
       )}
     </div>

@@ -37,11 +37,7 @@ const navigation = [
     href: "/#destinos",
     id: "destinos",
   },
-  {
-    label: "Contato",
-    href: "/#contato",
-    id: "contato",
-  },
+  
 ];
 
 export function Header() {

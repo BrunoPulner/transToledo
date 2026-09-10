@@ -1,11 +1,6 @@
 "use client";
 
 import {
-  ClipboardCheck,
-  type LucideIcon,
-} from "lucide-react";
-
-import {
   useMemo,
   useState,
 } from "react";
@@ -30,6 +25,10 @@ import {
   ContactStep,
 } from "./steps/ContactStep";
 
+import {
+  ReviewStep,
+} from "./steps/ReviewStep";
+
 import type {
   VehicleDateSelection,
 } from "./PublicVehicleCalendar";
@@ -51,10 +50,10 @@ const stepOrder: QuoteStep[] = [
   "review",
 ];
 
-type TemporaryStepProps = {
-  icon: LucideIcon;
-  title: string;
-  description: string;
+type SubmitQuoteResponse = {
+  success?: boolean;
+  quoteRequestId?: string;
+  message?: string;
 };
 
 export function FleetQuoteWizard() {
@@ -71,6 +70,7 @@ export function FleetQuoteWizard() {
   ] = useState<QuoteDraft>(
     () => ({
       ...initialQuoteDraft,
+
       contact: {
         ...initialQuoteDraft.contact,
       },
@@ -82,6 +82,22 @@ export function FleetQuoteWizard() {
     setIsSubmitting,
   ] = useState(false);
 
+  const [
+    submissionError,
+    setSubmissionError,
+  ] = useState("");
+
+  const [
+    submittedQuoteId,
+    setSubmittedQuoteId,
+  ] = useState<string | null>(
+    null,
+  );
+
+  /*
+   * Atualiza somente os campos informados,
+   * preservando o restante do orçamento.
+   */
   function updateQuoteDraft(
     updates: Partial<QuoteDraft>,
   ) {
@@ -91,11 +107,18 @@ export function FleetQuoteWizard() {
         ...updates,
       }),
     );
+
+    /*
+     * Caso o cliente altere alguma informação
+     * depois de um erro, removemos a mensagem.
+     */
+    if (submissionError) {
+      setSubmissionError("");
+    }
   }
 
   /*
-   * Período atualmente salvo no orçamento.
-   * Será enviado ao VehicleStep e ao modal.
+   * Período atualmente selecionado.
    */
   const selectedPeriod =
     useMemo<VehicleDateSelection | null>(
@@ -122,7 +145,7 @@ export function FleetQuoteWizard() {
     );
 
   /*
-   * Verifica se saída e retorno são válidos.
+   * Validação do período.
    */
   const validPeriod =
     quoteDraft.departureDate !==
@@ -133,7 +156,7 @@ export function FleetQuoteWizard() {
       quoteDraft.departureDate;
 
   /*
-   * A primeira etapa exige veículo e período.
+   * Validação da primeira etapa.
    */
   const vehicleStepValid =
     Boolean(
@@ -142,48 +165,70 @@ export function FleetQuoteWizard() {
     ) &&
     validPeriod;
 
+  /*
+   * Validação da quantidade
+   * de passageiros.
+   */
   const validPassengers =
     Number.isInteger(
       quoteDraft.passengers,
     ) &&
     quoteDraft.passengers > 0;
 
+  /*
+   * Validação de uma viagem cadastrada.
+   */
   const registeredTripValid =
     quoteDraft.tripMode ===
       "registered" &&
     Boolean(
       quoteDraft.frequentTripId &&
         quoteDraft.tripName &&
-        quoteDraft.origin &&
-        quoteDraft.destination,
-    );
-
-  const customTripValid =
-  quoteDraft.tripMode ===
-    "custom" &&
-  Boolean(
-    quoteDraft.origin.trim() &&
-      quoteDraft.destination.trim(),
-  ) &&
-  quoteDraft.destinationLatitude !==
-    null &&
-  quoteDraft.destinationLongitude !==
-    null;
-
+        quoteDraft.origin.trim() &&
+        quoteDraft.destination.trim(),
+    ) &&
+    quoteDraft.originLatitude !==
+      null &&
+    quoteDraft.originLongitude !==
+      null &&
+    quoteDraft.destinationLatitude !==
+      null &&
+    quoteDraft.destinationLongitude !==
+      null;
 
   /*
-   * A segunda etapa exige que a primeira
-   * esteja completa e que a viagem seja válida.
+   * Validação de uma viagem personalizada.
+   */
+  const customTripValid =
+    quoteDraft.tripMode ===
+      "custom" &&
+    Boolean(
+      quoteDraft.origin.trim() &&
+        quoteDraft.destination.trim(),
+    ) &&
+    quoteDraft.originLatitude !==
+      null &&
+    quoteDraft.originLongitude !==
+      null &&
+    quoteDraft.destinationLatitude !==
+      null &&
+    quoteDraft.destinationLongitude !==
+      null;
+
+  /*
+   * Validação da segunda etapa.
    */
   const tripStepValid =
     vehicleStepValid &&
     validPassengers &&
-    (registeredTripValid ||
-      customTripValid);
+    (
+      registeredTripValid ||
+      customTripValid
+    );
 
   /*
-   * O telefone somente será considerado
-   * válido após receber o token de confirmação.
+   * Validação das informações
+   * de contato.
    */
   const contactDataValid =
     quoteDraft.contact.name
@@ -199,13 +244,16 @@ export function FleetQuoteWizard() {
     );
 
   /*
-   * A terceira etapa também depende
-   * das anteriores.
+   * Validação da terceira etapa.
    */
   const contactStepValid =
     tripStepValid &&
     contactDataValid;
 
+  /*
+   * Etapas concluídas exibidas
+   * no componente de progresso.
+   */
   const completedSteps =
     useMemo<QuoteStep[]>(() => {
       const completed: QuoteStep[] =
@@ -229,13 +277,27 @@ export function FleetQuoteWizard() {
         );
       }
 
+      if (
+        contactStepValid &&
+        submittedQuoteId
+      ) {
+        completed.push(
+          "review",
+        );
+      }
+
       return completed;
     }, [
       vehicleStepValid,
       tripStepValid,
       contactStepValid,
+      submittedQuoteId,
     ]);
 
+  /*
+   * Define se o botão principal
+   * pode ser utilizado.
+   */
   const canContinue = (() => {
     switch (currentStep) {
       case "vehicle":
@@ -248,10 +310,10 @@ export function FleetQuoteWizard() {
         return contactStepValid;
 
       case "review":
-        return vehicleSummaryStepValid(
-          vehicleStepValid,
-          tripStepValid,
-          contactStepValid,
+        return (
+          vehicleStepValid &&
+          tripStepValid &&
+          contactStepValid
         );
 
       default:
@@ -261,7 +323,7 @@ export function FleetQuoteWizard() {
 
   /*
    * Selecionar outra van apaga o período,
-   * pois cada veículo possui agenda própria.
+   * pois cada veículo possui sua agenda.
    */
   function handleVehicleSelect(
     vehicle: Vehicle,
@@ -287,8 +349,8 @@ export function FleetQuoteWizard() {
   }
 
   /*
-   * Ao confirmar a agenda, veículo e período
-   * são salvos juntos no orçamento.
+   * Confirma o veículo e o período
+   * selecionado na agenda.
    */
   function handleConfirmAvailability(
     vehicle: Vehicle,
@@ -306,7 +368,14 @@ export function FleetQuoteWizard() {
     });
   }
 
+  /*
+   * Retorna para a etapa anterior.
+   */
   function goToPreviousStep() {
+    if (submittedQuoteId) {
+      return;
+    }
+
     const currentIndex =
       stepOrder.indexOf(
         currentStep,
@@ -316,17 +385,27 @@ export function FleetQuoteWizard() {
       return;
     }
 
-    setCurrentStep(
+    const previousStep =
       stepOrder[
         currentIndex - 1
-      ],
-    );
+      ];
+
+    if (previousStep) {
+      setCurrentStep(
+        previousStep,
+      );
+    }
   }
 
+  /*
+   * Avança para a próxima etapa
+   * ou envia o orçamento.
+   */
   async function goToNextStep() {
     if (
       !canContinue ||
-      isSubmitting
+      isSubmitting ||
+      submittedQuoteId
     ) {
       return;
     }
@@ -356,9 +435,17 @@ export function FleetQuoteWizard() {
     }
   }
 
+  /*
+   * Permite retornar para etapas anteriores
+   * pelo componente de progresso.
+   */
   function handleStepChange(
     step: QuoteStep,
   ) {
+    if (submittedQuoteId) {
+      return;
+    }
+
     const requestedIndex =
       stepOrder.indexOf(step);
 
@@ -368,7 +455,7 @@ export function FleetQuoteWizard() {
       );
 
     /*
-     * Sempre permite retornar para
+     * Sempre permite acessar
      * uma etapa anterior.
      */
     if (
@@ -380,8 +467,8 @@ export function FleetQuoteWizard() {
     }
 
     /*
-     * Permite reabrir uma etapa que
-     * já tenha sido concluída.
+     * Permite acessar etapas que
+     * já tenham sido concluídas.
      */
     if (
       completedSteps.includes(
@@ -392,23 +479,135 @@ export function FleetQuoteWizard() {
     }
   }
 
+  /*
+   * Envia a solicitação completa
+   * para a API.
+   */
   async function submitQuote() {
+    if (
+      !quoteDraft.departureDate ||
+      !quoteDraft.returnDate ||
+      !quoteDraft.tripMode
+    ) {
+      setSubmissionError(
+        "Existem informações obrigatórias faltando. Revise as etapas anteriores.",
+      );
+
+      return;
+    }
+
     setIsSubmitting(true);
+    setSubmissionError("");
 
     try {
-      /*
-       * A integração com /api/quote-requests
-       * será feita na etapa de revisão.
-       */
-      console.info(
-        "Orçamento pronto para envio:",
-        quoteDraft,
+      const response = await fetch(
+        "/api/quote-requests",
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+
+          body: JSON.stringify({
+            vehicleId:
+              quoteDraft.vehicleId,
+
+            startsAt:
+              quoteDraft
+                .departureDate
+                .toISOString(),
+
+            endsAt:
+              quoteDraft
+                .returnDate
+                .toISOString(),
+
+            tripMode:
+              quoteDraft.tripMode,
+
+            frequentTripId:
+              quoteDraft.frequentTripId,
+
+            tripName:
+              quoteDraft.tripName,
+
+            origin:
+              quoteDraft.origin,
+
+            originLatitude:
+              quoteDraft.originLatitude,
+
+            originLongitude:
+              quoteDraft.originLongitude,
+
+            destination:
+              quoteDraft.destination,
+
+            destinationLatitude:
+              quoteDraft
+                .destinationLatitude,
+
+            destinationLongitude:
+              quoteDraft
+                .destinationLongitude,
+
+            passengers:
+              quoteDraft.passengers,
+
+            notes:
+              quoteDraft.notes,
+
+            name:
+              quoteDraft.contact.name,
+
+            email:
+              quoteDraft.contact.email,
+
+            phone:
+              quoteDraft.contact.phone,
+
+            phoneVerificationToken:
+              quoteDraft.contact
+                .phoneVerificationToken,
+          }),
+        },
+      );
+
+      const result =
+        (await response.json()) as
+          SubmitQuoteResponse;
+
+      if (
+        !response.ok ||
+        !result.success ||
+        !result.quoteRequestId
+      ) {
+        throw new Error(
+          result.message ??
+            "Não foi possível enviar a solicitação de orçamento.",
+        );
+      }
+
+      setSubmittedQuoteId(
+        result.quoteRequestId,
+      );
+    } catch (error) {
+      setSubmissionError(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível enviar a solicitação de orçamento.",
       );
     } finally {
       setIsSubmitting(false);
     }
   }
 
+  /*
+   * Renderiza o conteúdo da
+   * etapa selecionada.
+   */
   function renderCurrentStep() {
     switch (currentStep) {
       case "vehicle":
@@ -430,16 +629,16 @@ export function FleetQuoteWizard() {
         );
 
       case "trip":
-  return (
-    <TripStep
-      quoteDraft={
-        quoteDraft
-      }
-      onDraftChange={
-        updateQuoteDraft
-      }
-    />
-  );
+        return (
+          <TripStep
+            quoteDraft={
+              quoteDraft
+            }
+            onDraftChange={
+              updateQuoteDraft
+            }
+          />
+        );
 
       case "contact":
         return (
@@ -447,25 +646,39 @@ export function FleetQuoteWizard() {
             contact={
               quoteDraft.contact
             }
-            onContactChange={
-              (contact) =>
-                updateQuoteDraft({
-                  contact,
-                })
+            onContactChange={(
+              contact,
+            ) =>
+              updateQuoteDraft({
+                contact,
+              })
             }
           />
         );
 
       case "review":
         return (
-          <TemporaryStep
-            icon={
-              ClipboardCheck
+          <ReviewStep
+            quoteDraft={
+              quoteDraft
             }
-            title="Revise a solicitação"
-            description="Confira todas as informações antes de salvar e abrir o WhatsApp."
+            submissionError={
+              submissionError
+            }
+            submittedQuoteId={
+              submittedQuoteId
+            }
+            onEditStep={(
+              step,
+            ) => {
+              setSubmissionError("");
+              setCurrentStep(step);
+            }}
           />
         );
+
+      default:
+        return null;
     }
   }
 
@@ -622,6 +835,11 @@ export function FleetQuoteWizard() {
             isSubmitting={
               isSubmitting
             }
+            submissionComplete={
+              Boolean(
+                submittedQuoteId,
+              )
+            }
             onBack={
               goToPreviousStep
             }
@@ -632,79 +850,5 @@ export function FleetQuoteWizard() {
         </div>
       </div>
     </section>
-  );
-}
-
-function TemporaryStep({
-  icon: Icon,
-  title,
-  description,
-}: TemporaryStepProps) {
-  return (
-    <div
-      className="
-        flex
-        min-h-80
-        flex-col
-        items-center
-        justify-center
-        rounded-2xl
-        border
-        border-dashed
-        border-white/10
-        bg-white/2
-        px-5
-        text-center
-      "
-    >
-      <span
-        className="
-          flex
-          size-14
-          items-center
-          justify-center
-          rounded-2xl
-          bg-yellow-400/10
-          text-yellow-400
-        "
-      >
-        <Icon size={26} />
-      </span>
-
-      <h3
-        className="
-          mt-4
-          text-xl
-          font-bold
-          text-white
-        "
-      >
-        {title}
-      </h3>
-
-      <p
-        className="
-          mt-2
-          max-w-md
-          text-sm
-          leading-6
-          text-white/45
-        "
-      >
-        {description}
-      </p>
-    </div>
-  );
-}
-
-function vehicleSummaryStepValid(
-  vehicleValid: boolean,
-  tripValid: boolean,
-  contactValid: boolean,
-) {
-  return (
-    vehicleValid &&
-    tripValid &&
-    contactValid
   );
 }
