@@ -28,7 +28,7 @@ const navigation = [
     id: "sobre",
   },
   {
-    label: "Frota",
+    label: "Orçamento",
     href: "/#frota",
     id: "frota",
   },
