@@ -1,7 +1,11 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 
-import { hashVerificationValue, verifyMetaSignature } from "@/lib/phone-verification";
+import {
+  areBrazilianPhonesEquivalent,
+  hashVerificationValue,
+  verifyMetaSignature,
+} from "@/lib/phone-verification";
 
 export const dynamic = "force-dynamic";
 
@@ -87,10 +91,18 @@ async function processMessage(message: MetaMessage) {
     console.info("Código recebido não está pendente.");
     return;
   }
-  if (data.phone !== sender) {
+  if (
+    typeof data.phone !== "string" ||
+    !areBrazilianPhonesEquivalent(
+      data.phone,
+      sender,
+    )
+  ) {
     console.warn("Telefone remetente não corresponde ao orçamento", {
       expectedEnding: String(data.phone ?? "").slice(-4),
       senderEnding: sender.slice(-4),
+      expectedLength: String(data.phone ?? "").replace(/\D/g, "").length,
+      senderLength: sender.replace(/\D/g, "").length,
     });
     return;
   }

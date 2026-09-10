@@ -2,7 +2,6 @@
 
 import {
   ClipboardCheck,
-  UserRound,
   type LucideIcon,
 } from "lucide-react";
 
@@ -26,6 +25,10 @@ import {
 import {
   TripStep,
 } from "./steps/TripStep";
+
+import {
+  ContactStep,
+} from "./steps/ContactStep";
 
 import type {
   VehicleDateSelection,
@@ -440,10 +443,16 @@ export function FleetQuoteWizard() {
 
       case "contact":
         return (
-          <TemporaryStep
-            icon={UserRound}
-            title="Informe seus dados"
-            description="Informe nome, e-mail, telefone e confirme seu número pelo WhatsApp."
+          <ContactStep
+            contact={
+              quoteDraft.contact
+            }
+            onContactChange={
+              (contact) =>
+                updateQuoteDraft({
+                  contact,
+                })
+            }
           />
         );
 

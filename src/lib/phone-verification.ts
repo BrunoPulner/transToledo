@@ -12,6 +12,60 @@ export function normalizeBrazilianPhone(value: string) {
   return null;
 }
 
+/*
+ * A Meta pode identificar um mesmo WhatsApp brasileiro com ou sem
+ * o nono dígito do celular. A comparação continua restrita ao mesmo
+ * DDD e aos mesmos oito dígitos do número, aceitando apenas essa
+ * diferença conhecida de representação.
+ */
+export function areBrazilianPhonesEquivalent(
+  firstPhone: string,
+  secondPhone: string,
+) {
+  const first = normalizeBrazilianPhone(firstPhone)
+    ?.replace(/^\+55/, "");
+
+  const second = normalizeBrazilianPhone(secondPhone)
+    ?.replace(/^\+55/, "");
+
+  if (!first || !second) {
+    return false;
+  }
+
+  if (first === second) {
+    return true;
+  }
+
+  const [shorter, longer] =
+    first.length < second.length
+      ? [first, second]
+      : [second, first];
+
+  if (
+    shorter.length !== 10 ||
+    longer.length !== 11
+  ) {
+    return false;
+  }
+
+  const sameAreaCode =
+    shorter.slice(0, 2) ===
+    longer.slice(0, 2);
+
+  const longerHasNinthDigit =
+    longer[2] === "9";
+
+  const sameSubscriberNumber =
+    shorter.slice(2) ===
+    longer.slice(3);
+
+  return (
+    sameAreaCode &&
+    longerHasNinthDigit &&
+    sameSubscriberNumber
+  );
+}
+
 function getVerificationSecret() {
   const secret = process.env.PHONE_VERIFICATION_SECRET;
   if (!secret || secret.length < 32) {
