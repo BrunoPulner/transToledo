@@ -9,6 +9,7 @@ import {
   LoaderCircle,
   LogOut,
   Menu,
+  MessageSquareText,
   Route,
   X,
 } from "lucide-react";
@@ -48,6 +49,11 @@ const navigation = [
     label: "Orçamentos",
     href: "/admin/orcamentos",
     icon: ClipboardList,
+  },
+  {
+    label: "Mensagens",
+    href: "/admin/mensagens",
+    icon: MessageSquareText,
   },
 ];
 

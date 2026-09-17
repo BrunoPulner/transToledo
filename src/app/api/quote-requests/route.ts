@@ -4,6 +4,7 @@ import {
 } from "firebase-admin/firestore";
 
 import {
+  after,
   NextResponse,
 } from "next/server";
 
@@ -16,6 +17,10 @@ import {
   normalizeBrazilianPhone,
   verifyPhoneVerificationToken,
 } from "@/lib/phone-verification";
+
+import {
+  sendTrackedWhatsAppTemplate,
+} from "@/lib/whatsapp/sendTrackedWhatsAppTemplate";
 
 export const dynamic =
   "force-dynamic";
@@ -823,6 +828,51 @@ export async function POST(
       },
     );
 
+    /*
+     * O envio acontece depois que a resposta
+     * do orçamento já estiver pronta.
+     *
+     * Se a Meta estiver indisponível, o
+     * orçamento continua salvo normalmente e
+     * a falha fica registrada em
+     * whatsappMessageLogs.
+     */
+    after(async () => {
+      const administratorPhone =
+        process.env.WHATSAPP_ADMIN_PHONE
+          ?.trim();
+
+      if (!administratorPhone) {
+        console.error(
+          "WHATSAPP_ADMIN_PHONE não configurado. O alerta do novo orçamento não foi enviado.",
+        );
+
+        return;
+      }
+
+      try {
+        await sendTrackedWhatsAppTemplate({
+          event: "quote_created",
+          template: "new_quote_admin",
+          to: administratorPhone,
+          parameters: [
+            name,
+            destination,
+            formatDateTime(startsAt),
+          ],
+          idempotencyKey:
+            `quote:${quoteReference.id}:new_quote_admin`,
+          quoteRequestId:
+            quoteReference.id,
+        });
+      } catch (error) {
+        console.error(
+          "O orçamento foi salvo, mas o alerta do WhatsApp não foi enviado:",
+          error,
+        );
+      }
+    });
+
     return NextResponse.json(
       {
         success: true,
@@ -875,6 +925,38 @@ export async function POST(
       },
     );
   }
+}
+
+/*
+ * Formata a data no horário utilizado pela
+ * empresa antes de preencher a variável do
+ * modelo aprovado na Meta.
+ */
+function formatDateTime(
+  date: Date,
+): string {
+  return new Intl.DateTimeFormat(
+    "pt-BR",
+    {
+      timeZone:
+        "America/Sao_Paulo",
+
+      day:
+        "2-digit",
+
+      month:
+        "2-digit",
+
+      year:
+        "numeric",
+
+      hour:
+        "2-digit",
+
+      minute:
+        "2-digit",
+    },
+  ).format(date);
 }
 
 /*
