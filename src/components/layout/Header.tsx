@@ -250,13 +250,17 @@ export function Header() {
     <>
       {/* HEADER */}
       <header
-  className={`fixed left-0 top-0 z-50 w-full transition-all duration-500 ${
-    scrolled
-      ? "bg-black/80 shadow-md shadow-black/20 backdrop-blur-xl"
-      : "bg-transparent"
-  }`}
->
-        <div className="mx-auto flex h-28 w-full max-w-375 items-center justify-between px-5 lg:h-28 lg:px-10">
+        className={`fixed left-0 top-0 z-50 w-full transition-[background-color,box-shadow,backdrop-filter] duration-500 motion-reduce:transition-none ${
+          scrolled
+            ? "bg-black/80 shadow-md shadow-black/20 backdrop-blur-xl"
+            : "bg-transparent"
+        }`}
+      >
+        <div
+          className={`mx-auto flex w-full max-w-375 items-center justify-between px-5 transition-[height] duration-500 ease-in-out motion-reduce:transition-none lg:px-10 ${
+            scrolled ? "h-20 lg:h-18" : "h-28"
+          }`}
+        >
           {/* LOGO */}
           <Link
             href="/"
@@ -272,12 +276,18 @@ export function Header() {
               width={320}
               height={120}
               sizes="(max-width: 1024px) 180px, 200px"
-              className="h-auto w-45 object-contain lg:w-50"
+              className={`h-auto object-contain transition-[width] duration-500 ease-in-out motion-reduce:transition-none ${
+                scrolled ? "w-36 lg:w-39" : "w-45 lg:w-50"
+              }`}
             />
           </Link>
 
           {/* MENU DESKTOP */}
-          <nav className="hidden items-center gap-9 lg:flex">
+          <nav
+            className={`hidden items-center transition-[gap] duration-500 ease-in-out motion-reduce:transition-none lg:flex ${
+              scrolled ? "gap-7" : "gap-9"
+            }`}
+          >
             {navigation.map((item) => {
               const active = isActive(
                 item.href,
@@ -291,7 +301,9 @@ export function Header() {
                   onClick={() =>
                     handleNavigation(item.id)
                   }
-                  className={`group relative py-3 text-sm font-medium transition-colors duration-300 ${
+                  className={`group relative text-sm font-medium transition-[padding,color] duration-500 motion-reduce:transition-none ${
+                    scrolled ? "py-2" : "py-3"
+                  } ${
                     active
                       ? "text-yellow-500"
                       : "text-white/70 hover:text-white"
@@ -323,7 +335,9 @@ export function Header() {
                     : "dark"
                 )
               }
-              className="flex size-11 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white transition duration-300 hover:border-yellow-400/50 hover:bg-white/10 hover:text-yellow-400"
+              className={`flex items-center justify-center rounded-full border border-white/15 bg-white/5 text-white transition-[width,height,background-color,border-color,color] duration-500 motion-reduce:transition-none hover:border-yellow-400/50 hover:bg-white/10 hover:text-yellow-400 ${
+                scrolled ? "size-10" : "size-11"
+              }`}
               aria-label="Alterar tema"
             >
               {mounted &&
@@ -338,7 +352,9 @@ export function Header() {
             {!checkingAuth && (
               <Link
                 href={adminHref}
-                className="flex items-center gap-2 rounded-full border border-yellow-400/70 px-5 py-3 text-sm font-semibold text-yellow-400 transition duration-300 hover:bg-yellow-400 hover:text-black"
+                className={`flex items-center gap-2 rounded-full border border-yellow-400/70 text-sm font-semibold text-yellow-400 transition-[padding,background-color,color] duration-500 motion-reduce:transition-none hover:bg-yellow-400 hover:text-black ${
+                  scrolled ? "px-4 py-2.5" : "px-5 py-3"
+                }`}
               >
                 <LockKeyhole size={16} />
 
@@ -355,7 +371,9 @@ export function Header() {
                 (value) => !value
               )
             }
-            className="relative z-50 flex size-11 items-center justify-center rounded-full border border-white/15 bg-black/20 text-white backdrop-blur-md transition duration-300 hover:border-yellow-400/40 hover:text-yellow-400 lg:hidden"
+            className={`relative z-50 flex items-center justify-center rounded-full border border-white/15 bg-black/20 text-white backdrop-blur-md transition-[width,height,border-color,color] duration-500 motion-reduce:transition-none hover:border-yellow-400/40 hover:text-yellow-400 lg:hidden ${
+              scrolled ? "size-10" : "size-11"
+            }`}
             aria-label={
               menuOpen
                 ? "Fechar menu"

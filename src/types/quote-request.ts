@@ -1,7 +1,8 @@
 export type QuoteRequestStatus =
   | "pending"
   | "approved"
-  | "rejected";
+  | "rejected"
+  | "cancelled";
 
 export type QuoteRequestRecord = {
   id: string;
@@ -34,6 +35,9 @@ export type QuoteRequestRecord = {
   status: QuoteRequestStatus;
   source: string;
   rejectionReason: string | null;
+  scheduleId?: string | null;
+  cancellationReason?: string | null;
+  cancelledAt?: string | null;
   createdAt: string | null;
   updatedAt: string | null;
   reviewedAt: string | null;

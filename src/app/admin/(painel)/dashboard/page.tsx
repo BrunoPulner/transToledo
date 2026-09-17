@@ -1,142 +1,165 @@
-import {
-  BusFront,
-  CalendarDays,
-  ClipboardList,
-  Route,
-} from "lucide-react";
-
+import { Timestamp } from "firebase-admin/firestore";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { adminAuth } from "@/lib/firebase/admin";
+import { DashboardOverview, type DashboardBooking, type DashboardVehicle } from "@/app/admin/(painel)/DashboardOverview";
+import { adminAuth, adminDb } from "@/lib/firebase/admin";
 
-const cards = [
-  {
-    title: "Frota",
-    value: "0",
-    description: "Veículos cadastrados",
-    icon: BusFront,
-  },
-  {
-    title: "Orçamentos",
-    value: "0",
-    description: "Solicitações pendentes",
-    icon: ClipboardList,
-  },
-  {
-    title: "Viagens",
-    value: "0",
-    description: "Viagens agendadas",
-    icon: Route,
-  },
-  {
-    title: "Agenda",
-    value: "0",
-    description: "Compromissos próximos",
-    icon: CalendarDays,
-  },
-];
+export const dynamic = "force-dynamic";
+
+function readText(value: unknown, fallback = "Não informado") {
+  return typeof value === "string" && value.trim()
+    ? value.trim()
+    : fallback;
+}
+
+function readDate(value: unknown): Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  if (
+    value &&
+    typeof value === "object" &&
+    "toDate" in value &&
+    typeof value.toDate === "function"
+  ) {
+    const date = value.toDate();
+
+    return date instanceof Date && !Number.isNaN(date.getTime())
+      ? date
+      : null;
+  }
+
+  if (typeof value === "string") {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  return null;
+}
 
 export default async function DashboardPage() {
-  const cookieStore = await cookies();
+  const session = (await cookies()).get("transtoledo_session")?.value;
 
-  const sessionCookie = cookieStore.get(
-    "transtoledo_session"
-  )?.value;
-
-  if (!sessionCookie) {
+  if (!session) {
     redirect("/admin");
   }
 
   try {
-    await adminAuth.verifySessionCookie(
-      sessionCookie,
-      true
-    );
+    await adminAuth.verifySessionCookie(session, true);
   } catch {
     redirect("/admin");
   }
 
+  const now = new Date();
+
+  const [fleet, pending, trips, schedules] = await Promise.all([
+    adminDb.collection("vehicles").get(),
+
+    adminDb
+      .collection("quoteRequests")
+      .where("status", "==", "pending")
+      .count()
+      .get(),
+
+    adminDb.collection("frequentTrips").count().get(),
+
+    // Inclui viagens futuras e viagens que já começaram,
+    // desde que o horário de retorno ainda não tenha passado.
+    adminDb
+      .collection("vehicleSchedules")
+      .where("endsAt", ">", Timestamp.fromDate(now))
+      .get(),
+  ]);
+
+  const vehicles: DashboardVehicle[] = fleet.docs.map((document) => {
+    const data = document.data();
+
+    const media = Array.isArray(data.media)
+      ? data.media as Array<{
+          type?: string;
+          url?: string;
+          isCover?: boolean;
+        }>
+      : [];
+
+    const cover =
+      media.find((item) => item.type === "image" && item.isCover && item.url) ??
+      media.find((item) => item.type === "image" && item.url);
+
+    return {
+      id: document.id,
+      name: readText(data.model, "Veículo"),
+      image: cover?.url ?? null,
+    };
+  });
+
+  const bookings: DashboardBooking[] = schedules.docs
+    .flatMap((document) => {
+      const data = document.data();
+
+      if (
+        data.type !== "booking" ||
+        (data.status ?? "active") !== "active"
+      ) {
+        return [];
+      }
+
+      const start = readDate(data.startsAt);
+      const end = readDate(data.endsAt);
+
+      if (!start || !end || end <= now) {
+        return [];
+      }
+
+      return [{
+        id: document.id,
+        vehicleId: readText(data.vehicleId, ""),
+        vehicleName: readText(
+          data.vehicleName,
+          vehicles.find((vehicle) => vehicle.id === data.vehicleId)?.name ??
+            "Veículo",
+        ),
+        tripName: readText(data.trip?.name ?? data.title, "Viagem confirmada"),
+        customerName: readText(data.customer?.name),
+        customerPhone: readText(data.customer?.phone),
+        customerEmail: readText(data.customer?.email),
+        origin: readText(data.trip?.origin?.address),
+        destination: readText(data.trip?.destination?.address),
+        passengers:
+          typeof data.trip?.passengers === "number"
+            ? data.trip.passengers
+            : null,
+        notes:
+          typeof data.trip?.notes === "string"
+            ? data.trip.notes
+            : "",
+        quoteId: readText(data.quoteRequestId ?? data.quoteId, ""),
+        startsAt: start.toISOString(),
+        endsAt: end.toISOString(),
+      }];
+    })
+    .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+
+  const agendaCount = schedules.docs.filter((document) => {
+    const data = document.data();
+    const end = readDate(data.endsAt);
+
+    return (
+      (data.status ?? "active") === "active" &&
+      end !== null &&
+      end > now
+    );
+  }).length;
+
   return (
-    <main className="min-h-dvh bg-[#07090b] px-5 py-10 text-white lg:px-10">
-      <div className="mx-auto w-full max-w-7xl">
-        {/* CABEÇALHO */}
-        <div>
-          <div className="flex items-center gap-3">
-            <span className="h-px w-10 bg-yellow-400" />
-
-            <span className="text-xs font-bold uppercase tracking-[0.3em] text-yellow-400">
-              Administração
-            </span>
-          </div>
-
-          <h1 className="mt-4 font-(family-name:--font-montserrat) text-3xl font-bold sm:text-4xl">
-            Dashboard
-          </h1>
-
-          <p className="mt-2 text-sm text-white/50">
-            Acompanhe as operações da TransToledo
-            em um único lugar.
-          </p>
-        </div>
-
-        {/* CARDS */}
-        <div className="mt-10 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {cards.map((card) => {
-            const Icon = card.icon;
-
-            return (
-              <article
-                key={card.title}
-                className="rounded-2xl border border-white/10 bg-white/4 p-6 transition duration-300 hover:border-yellow-400/30 hover:bg-white/6"
-              >
-                <div className="flex size-11 items-center justify-center rounded-xl bg-yellow-400/10 text-yellow-400">
-                  <Icon size={21} />
-                </div>
-
-                <div className="mt-6">
-                  <p className="text-sm font-medium text-white/50">
-                    {card.title}
-                  </p>
-
-                  <p className="mt-1 text-3xl font-bold">
-                    {card.value}
-                  </p>
-
-                  <p className="mt-2 text-xs text-white/35">
-                    {card.description}
-                  </p>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-
-        {/* CONTEÚDO INICIAL */}
-        <section className="mt-8 rounded-2xl border border-white/10 bg-white/3 p-6">
-          <h2 className="font-(family-name:--font-montserrat) text-lg font-bold">
-            Operações recentes
-          </h2>
-
-          <p className="mt-2 text-sm text-white/40">
-            As próximas viagens e solicitações de
-            orçamento aparecerão aqui.
-          </p>
-
-          <div className="mt-8 flex min-h-40 items-center justify-center rounded-xl border border-dashed border-white/10">
-            <div className="text-center">
-              <CalendarDays
-                size={30}
-                className="mx-auto text-white/20"
-              />
-
-              <p className="mt-3 text-sm text-white/35">
-                Nenhuma operação registrada ainda.
-              </p>
-            </div>
-          </div>
-        </section>
-      </div>
-    </main>
+    <DashboardOverview
+      vehicles={vehicles}
+      bookings={bookings}
+      pendingCount={pending.data().count}
+      tripCount={trips.data().count}
+      agendaCount={agendaCount}
+    />
   );
 }

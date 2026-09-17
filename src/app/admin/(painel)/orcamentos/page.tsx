@@ -28,10 +28,11 @@ import type {
 type Filter = "all" | QuoteRequestStatus;
 
 const statusDetails = {
-  pending: { label: "Pendente", className: "border-amber-400/20 bg-amber-400/10 text-amber-300" },
-  approved: { label: "Aprovado", className: "border-emerald-400/20 bg-emerald-400/10 text-emerald-300" },
-  rejected: { label: "Recusado", className: "border-red-400/20 bg-red-400/10 text-red-300" },
-} satisfies Record<QuoteRequestStatus, { label: string; className: string }>;
+  pending: { label: "Aguardando análise", className: "border-amber-400/30 bg-amber-400/15 text-amber-200", card: "border-amber-400/25 hover:border-amber-400/60", stripe: "bg-amber-400" },
+  approved: { label: "Viagem aprovada", className: "border-emerald-400/30 bg-emerald-400/15 text-emerald-200", card: "border-emerald-400/25 hover:border-emerald-400/60", stripe: "bg-emerald-400" },
+  rejected: { label: "Orçamento recusado", className: "border-rose-400/30 bg-rose-400/15 text-rose-200", card: "border-rose-400/25 hover:border-rose-400/60", stripe: "bg-rose-400" },
+  cancelled: { label: "Viagem cancelada", className: "border-slate-400/30 bg-slate-400/15 text-slate-200", card: "border-slate-400/25 hover:border-slate-400/60", stripe: "bg-slate-400" },
+} satisfies Record<QuoteRequestStatus, { label: string; className: string; card: string; stripe: string }>;
 
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
   day: "2-digit",
@@ -45,8 +46,8 @@ export default function QuoteRequestsPage() {
   const [requests, setRequests] = useState<QuoteRequestRecord[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<Filter>("pending");
   const [selectedRequest, setSelectedRequest] = useState<QuoteRequestRecord | null>(null);
-  const [rejectionOpen, setRejectionOpen] = useState(false);
-  const [rejectionReason, setRejectionReason] = useState("");
+  const [decision, setDecision] = useState<"approved" | "rejected" | "cancelled" | null>(null);
+  const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState("");
@@ -82,16 +83,19 @@ export default function QuoteRequestsPage() {
     pending: requests.filter((item) => item.status === "pending").length,
     approved: requests.filter((item) => item.status === "approved").length,
     rejected: requests.filter((item) => item.status === "rejected").length,
+    cancelled: requests.filter((item) => item.status === "cancelled").length,
   }), [requests]);
 
   const filteredRequests = useMemo(
-    () => selectedFilter === "all" ? requests : requests.filter((item) => item.status === selectedFilter),
+    () => selectedFilter === "all"
+      ? [...requests].sort((a, b) => Number(b.status === "pending") - Number(a.status === "pending"))
+      : requests.filter((item) => item.status === selectedFilter),
     [requests, selectedFilter],
   );
 
-  async function registerDecision(decision: "approved" | "rejected") {
-    if (!selectedRequest || updating) return;
-    if (decision === "approved" && !window.confirm("Deseja aprovar esta solicitação de orçamento?")) return;
+  async function registerDecision() {
+    if (!selectedRequest || !decision || updating) return;
+    if (decision !== "approved" && reason.trim().length < 3) return;
 
     setUpdating(true);
     setError("");
@@ -102,25 +106,29 @@ export default function QuoteRequestsPage() {
         body: JSON.stringify({
           quoteRequestId: selectedRequest.id,
           decision,
-          rejectionReason,
+          rejectionReason: decision === "rejected" ? reason.trim() : undefined,
+          cancellationReason: decision === "cancelled" ? reason.trim() : undefined,
         }),
       });
-      const result = (await response.json()) as { success?: boolean; message?: string };
-      if (!response.ok || !result.success) {
+      const result = (await response.json()) as { success?: boolean; message?: string; status?: QuoteRequestStatus; scheduleId?: string | null };
+      if (!response.ok || !result.success || result.status !== decision) {
         throw new Error(result.message ?? "Não foi possível registrar a decisão.");
       }
 
-      const updated = {
+      const updated: QuoteRequestRecord = {
         ...selectedRequest,
         status: decision,
-        rejectionReason: decision === "rejected" ? rejectionReason.trim() : null,
-        reviewedAt: new Date().toISOString(),
-      } satisfies QuoteRequestRecord;
+        scheduleId: result.scheduleId ?? selectedRequest.scheduleId,
+        rejectionReason: decision === "rejected" ? reason.trim() : selectedRequest.rejectionReason,
+        cancellationReason: decision === "cancelled" ? reason.trim() : selectedRequest.cancellationReason,
+        cancelledAt: decision === "cancelled" ? new Date().toISOString() : selectedRequest.cancelledAt,
+        reviewedAt: decision === "cancelled" ? selectedRequest.reviewedAt : new Date().toISOString(),
+      };
 
       setRequests((current) => current.map((item) => item.id === updated.id ? updated : item));
       setSelectedRequest(updated);
-      setRejectionOpen(false);
-      setRejectionReason("");
+      setDecision(null);
+      setReason("");
     } catch (decisionError) {
       setError(decisionError instanceof Error ? decisionError.message : "Não foi possível registrar a decisão.");
     } finally {
@@ -135,25 +143,26 @@ export default function QuoteRequestsPage() {
           <div>
             <div className="flex items-center gap-3"><span className="h-px w-10 bg-yellow-400" /><span className="text-xs font-bold uppercase tracking-[0.3em] text-yellow-400">Administração</span></div>
             <h1 className="mt-4 text-3xl font-bold sm:text-4xl">Orçamentos</h1>
-            <p className="mt-2 text-sm text-white/50">Analise as solicitações enviadas pelos clientes.</p>
+            <p className="mt-2 text-sm text-white/50">Acompanhe solicitações, viagens aprovadas e cancelamentos.</p>
           </div>
           <button type="button" onClick={() => void loadRequests()} disabled={loading} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 text-xs font-bold text-white/65 transition hover:border-yellow-400/30 hover:text-yellow-400 disabled:opacity-50">
             <RefreshCw size={15} className={loading ? "animate-spin" : ""} /> Atualizar
           </button>
         </header>
 
-        <div className="mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <Statistic title="Total" value={counts.all} icon={ClipboardList} />
           <Statistic title="Pendentes" value={counts.pending} icon={Clock3} tone="amber" />
           <Statistic title="Aprovados" value={counts.approved} icon={CheckCircle2} tone="emerald" />
           <Statistic title="Recusados" value={counts.rejected} icon={XCircle} tone="red" />
+          <Statistic title="Cancelados" value={counts.cancelled} icon={XCircle} tone="slate" />
         </div>
 
         {error && <p className="mt-5 rounded-xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-300">{error}</p>}
 
         <div className="mt-7 flex flex-wrap gap-2">
-          {(["all", "pending", "approved", "rejected"] as const).map((filter) => (
-            <button key={filter} type="button" onClick={() => setSelectedFilter(filter)} className={`rounded-full border px-4 py-2 text-xs font-bold transition ${selectedFilter === filter ? "border-yellow-400 bg-yellow-400 text-slate-950" : "border-white/10 bg-white/4 text-white/50 hover:text-white"}`}>
+          {(["all", "pending", "approved", "rejected", "cancelled"] as const).map((filter) => (
+            <button key={filter} type="button" aria-pressed={selectedFilter === filter} onClick={() => setSelectedFilter(filter)} className={`rounded-full border px-4 py-2 text-xs font-bold transition ${selectedFilter === filter ? "border-yellow-400 bg-yellow-400 text-slate-950" : "border-white/10 bg-white/4 text-white/50 hover:text-white"}`}>
               {filter === "all" ? "Todos" : statusDetails[filter].label} ({counts[filter]})
             </button>
           ))}
@@ -165,8 +174,8 @@ export default function QuoteRequestsPage() {
           ) : filteredRequests.length === 0 ? (
             <div className="flex min-h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/2 text-center"><ClipboardList size={32} className="text-white/15" /><p className="mt-3 text-sm text-white/40">Nenhum orçamento encontrado neste filtro.</p></div>
           ) : (
-            <div className="grid gap-4 xl:grid-cols-2">
-              {filteredRequests.map((quote) => <QuoteCard key={quote.id} quote={quote} onOpen={() => { setSelectedRequest(quote); setRejectionOpen(false); setRejectionReason(""); }} />)}
+            <div className="space-y-2">
+              {filteredRequests.map((quote) => <QuoteCard key={quote.id} quote={quote} onOpen={() => { setSelectedRequest(quote); setDecision(null); setReason(""); setError(""); }} />)}
             </div>
           )}
         </section>
@@ -176,14 +185,14 @@ export default function QuoteRequestsPage() {
         <QuoteDetails
           quote={selectedRequest}
           updating={updating}
-          rejectionOpen={rejectionOpen}
-          rejectionReason={rejectionReason}
-          onClose={() => setSelectedRequest(null)}
-          onApprove={() => void registerDecision("approved")}
-          onOpenRejection={() => setRejectionOpen(true)}
-          onCancelRejection={() => { setRejectionOpen(false); setRejectionReason(""); }}
-          onRejectionReasonChange={setRejectionReason}
-          onReject={() => void registerDecision("rejected")}
+          decision={decision}
+          reason={reason}
+          error={error}
+          onClose={() => { if (!updating) { setSelectedRequest(null); setDecision(null); setError(""); } }}
+          onChoose={(value) => { setDecision(value); setReason(""); setError(""); }}
+          onBack={() => { setDecision(null); setReason(""); setError(""); }}
+          onReasonChange={setReason}
+          onConfirm={() => void registerDecision()}
         />
       )}
     </main>
@@ -191,27 +200,36 @@ export default function QuoteRequestsPage() {
 }
 
 function QuoteCard({ quote, onOpen }: { quote: QuoteRequestRecord; onOpen: () => void }) {
+  const detail = statusDetails[quote.status];
   return (
-    <article className="rounded-2xl border border-white/10 bg-white/3 p-5 transition hover:border-white/20">
-      <div className="flex items-start justify-between gap-3"><div><StatusBadge status={quote.status} /><h2 className="mt-3 text-lg font-bold text-white">{quote.customer.name}</h2><p className="mt-1 text-xs text-white/35">Solicitado em {formatDate(quote.createdAt)}</p></div><span className="rounded-lg border border-white/10 bg-black/20 px-2 py-1 font-mono text-[9px] text-white/30">{quote.id.slice(0, 8)}</span></div>
-      <div className="mt-4 grid gap-2 sm:grid-cols-2">
-        <SmallInfo icon={BusFront} label="Veículo" value={quote.vehicleName} />
-        <SmallInfo icon={UsersRound} label="Passageiros" value={String(quote.trip.passengers)} />
-        <SmallInfo icon={MapPin} label="Destino" value={quote.trip.destination.address} />
-        <SmallInfo icon={CalendarDays} label="Saída" value={formatDate(quote.startsAt)} />
+    <article className={`relative overflow-hidden rounded-2xl border bg-[#14171c] transition-colors ${detail.card}`}>
+      <span className={`absolute inset-y-0 left-0 w-1 ${detail.stripe}`} />
+      <div className="flex flex-col gap-4 p-4 pl-5 lg:flex-row lg:items-center lg:gap-6 lg:p-5 lg:pl-6">
+        <div className="min-w-0 lg:w-56 lg:shrink-0">
+          <StatusBadge status={quote.status} />
+          <h2 className="mt-2 truncate text-base font-bold text-white">{quote.customer.name}</h2>
+          <p className="mt-1 text-[11px] text-white/40">Solicitado em {formatDate(quote.createdAt)}</p>
+        </div>
+        <div className="grid min-w-0 flex-1 gap-3 text-xs sm:grid-cols-3">
+          <SmallInfo icon={BusFront} label="Veículo" value={quote.vehicleName} />
+          <SmallInfo icon={MapPin} label="Destino" value={quote.trip.destination.address} />
+          <SmallInfo icon={CalendarDays} label="Saída" value={formatDate(quote.startsAt)} />
+        </div>
+        <button type="button" onClick={onOpen} aria-label={`Ver solicitação de ${quote.customer.name}`} className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 text-xs font-bold text-white/75 transition hover:border-yellow-400/50 hover:text-yellow-400">Ver detalhes <ChevronRight size={15} /></button>
       </div>
-      <button type="button" onClick={onOpen} className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white/65 transition hover:border-yellow-400/30 hover:text-yellow-400">Ver solicitação <ChevronRight size={14} /></button>
     </article>
   );
 }
 
-function QuoteDetails({ quote, updating, rejectionOpen, rejectionReason, onClose, onApprove, onOpenRejection, onCancelRejection, onRejectionReasonChange, onReject }: {
-  quote: QuoteRequestRecord; updating: boolean; rejectionOpen: boolean; rejectionReason: string; onClose: () => void; onApprove: () => void; onOpenRejection: () => void; onCancelRejection: () => void; onRejectionReasonChange: (value: string) => void; onReject: () => void;
+function QuoteDetails({ quote, updating, decision, reason, error, onClose, onChoose, onBack, onReasonChange, onConfirm }: {
+  quote: QuoteRequestRecord; updating: boolean; decision: "approved" | "rejected" | "cancelled" | null; reason: string; error: string;
+  onClose: () => void; onChoose: (decision: "approved" | "rejected" | "cancelled") => void; onBack: () => void;
+  onReasonChange: (value: string) => void; onConfirm: () => void;
 }) {
   return (
     <div className="fixed inset-0 z-100 flex items-end justify-center bg-black/75 p-0 backdrop-blur-sm sm:items-center sm:p-5" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section role="dialog" aria-modal="true" className="max-h-[92dvh] w-full overflow-y-auto rounded-t-3xl border border-white/10 bg-[#11151b] shadow-2xl sm:max-w-3xl sm:rounded-3xl">
-        <header className="sticky top-0 z-10 flex items-start justify-between border-b border-white/10 bg-[#11151b]/95 px-5 py-4 backdrop-blur-xl sm:px-6"><div><StatusBadge status={quote.status} /><h2 className="mt-2 text-xl font-bold">Solicitação de {quote.customer.name}</h2><p className="mt-1 font-mono text-[10px] text-white/30">{quote.id}</p></div><button type="button" onClick={onClose} className="flex size-9 items-center justify-center rounded-xl border border-white/10 text-white/50"><X size={17} /></button></header>
+      <section role="dialog" aria-modal="true" aria-label={`Solicitação de ${quote.customer.name}`} className="max-h-[92dvh] w-full overflow-y-auto rounded-t-3xl border border-white/10 bg-[#11151b] shadow-2xl sm:max-w-3xl sm:rounded-3xl">
+        <header className="sticky top-0 z-10 flex items-start justify-between border-b border-white/10 bg-[#11151b]/95 px-5 py-4 backdrop-blur-xl sm:px-6"><div><StatusBadge status={quote.status} /><h2 className="mt-2 text-xl font-bold">Solicitação de {quote.customer.name}</h2><p className="mt-1 font-mono text-[10px] text-white/30">{quote.id}</p></div><button type="button" onClick={onClose} disabled={updating} aria-label="Fechar detalhes" className="flex size-9 items-center justify-center rounded-xl border border-white/10 text-white/50 disabled:opacity-50"><X size={17} /></button></header>
 
         <div className="space-y-5 p-5 sm:p-6">
           <DetailSection title="Cliente" icon={UserRound}><DetailGrid><SmallInfo icon={UserRound} label="Nome" value={quote.customer.name} /><SmallInfo icon={Mail} label="E-mail" value={quote.customer.email} /><SmallInfo icon={Phone} label="WhatsApp" value={quote.customer.phone} /></DetailGrid></DetailSection>
@@ -220,13 +238,23 @@ function QuoteDetails({ quote, updating, rejectionOpen, rejectionReason, onClose
 
           {quote.rejectionReason && <div className="rounded-xl border border-red-400/20 bg-red-400/8 p-4"><p className="text-[9px] font-bold uppercase tracking-wider text-red-300">Motivo da recusa</p><p className="mt-2 text-xs leading-5 text-red-100/65">{quote.rejectionReason}</p></div>}
 
-          {quote.status === "pending" && (
+          {quote.cancellationReason && <div className="rounded-xl border border-slate-400/20 bg-slate-400/8 p-4"><p className="text-[9px] font-bold uppercase tracking-wider text-slate-300">Motivo do cancelamento</p><p className="mt-2 text-xs leading-5 text-white/70">{quote.cancellationReason}</p></div>}
+          {error && <p role="alert" className="rounded-xl border border-red-400/30 bg-red-400/10 p-3 text-sm text-red-200">{error}</p>}
+
+          {!decision && quote.status === "pending" && (
             <div className="border-t border-white/10 pt-5">
-              {rejectionOpen ? (
-                <div><label className="text-[10px] font-bold uppercase tracking-wider text-white/40">Motivo da recusa</label><textarea value={rejectionReason} onChange={(event) => onRejectionReasonChange(event.target.value)} maxLength={500} rows={3} placeholder="Informe por que a solicitação não será aprovada" className="mt-2 w-full resize-none rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-white outline-none placeholder:text-white/20 focus:border-red-400/50" /><div className="mt-3 flex justify-end gap-2"><button type="button" onClick={onCancelRejection} disabled={updating} className="h-10 rounded-xl border border-white/10 px-4 text-xs font-bold text-white/55">Cancelar</button><button type="button" onClick={onReject} disabled={updating || rejectionReason.trim().length < 3} className="flex h-10 items-center gap-2 rounded-xl bg-red-600 px-4 text-xs font-bold text-white disabled:opacity-40">{updating && <LoaderCircle size={14} className="animate-spin" />}Confirmar recusa</button></div></div>
-              ) : (
-                <div className="flex flex-col gap-2 sm:flex-row sm:justify-end"><button type="button" onClick={onOpenRejection} disabled={updating} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-red-400/25 bg-red-400/8 px-5 text-xs font-bold text-red-300"><XCircle size={16} />Recusar</button><button type="button" onClick={onApprove} disabled={updating} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 text-xs font-bold text-white disabled:opacity-50">{updating ? <LoaderCircle size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}Aprovar orçamento</button></div>
-              )}
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end"><button type="button" onClick={() => onChoose("rejected")} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-rose-400/30 bg-rose-400/10 px-5 text-xs font-bold text-rose-200"><XCircle size={16} />Recusar</button><button type="button" onClick={() => onChoose("approved")} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 text-xs font-bold text-black"><CheckCircle2 size={16} />Aprovar orçamento</button></div>
+            </div>
+          )}
+          {!decision && quote.status === "approved" && (
+            <div className="flex flex-col gap-3 border-t border-white/10 pt-5 sm:flex-row sm:items-center sm:justify-between"><p className="text-xs text-white/50">Cancelar libera o veículo na agenda e registra o motivo.</p><button type="button" onClick={() => onChoose("cancelled")} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-rose-400/30 bg-rose-400/10 px-5 text-xs font-bold text-rose-200"><XCircle size={16} />Cancelar viagem</button></div>
+          )}
+          {decision && (
+            <div className="rounded-2xl border border-amber-400/25 bg-amber-400/5 p-5">
+              <h3 className="text-base font-bold">Confirmar {decision === "approved" ? "aprovação" : decision === "rejected" ? "recusa" : "cancelamento"}?</h3>
+              <p className="mt-2 text-xs leading-5 text-white/55">{decision === "approved" ? "A viagem será confirmada e reservada na agenda." : decision === "cancelled" ? "A reserva será cancelada e o veículo ficará disponível novamente." : "O orçamento será recusado com o motivo informado abaixo."}</p>
+              {decision !== "approved" && <div className="mt-4"><label htmlFor="quote-reason" className="text-xs font-bold text-white/75">Motivo obrigatório</label><textarea id="quote-reason" autoFocus value={reason} onChange={(event) => onReasonChange(event.target.value)} maxLength={500} rows={3} placeholder="Descreva o motivo para o cliente" className="mt-2 w-full resize-none rounded-xl border border-white/15 bg-black/25 p-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-yellow-400/60" /><p className="text-right text-[10px] text-white/40">{reason.length}/500</p></div>}
+              <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" onClick={onBack} disabled={updating} className="h-10 rounded-xl border border-white/15 px-4 text-xs font-bold text-white/65 disabled:opacity-50">Voltar</button><button type="button" onClick={onConfirm} disabled={updating || (decision !== "approved" && reason.trim().length < 3)} className={`flex h-10 items-center justify-center gap-2 rounded-xl px-5 text-xs font-bold disabled:opacity-40 ${decision === "approved" ? "bg-emerald-500 text-black" : "bg-rose-500 text-white"}`}>{updating && <LoaderCircle size={15} className="animate-spin" />} Confirmar {decision === "approved" ? "aprovação" : decision === "rejected" ? "recusa" : "cancelamento"}</button></div>
             </div>
           )}
         </div>
@@ -235,9 +263,9 @@ function QuoteDetails({ quote, updating, rejectionOpen, rejectionReason, onClose
   );
 }
 
-function Statistic({ title, value, icon: Icon, tone = "default" }: { title: string; value: number; icon: typeof ClipboardList; tone?: "default" | "amber" | "emerald" | "red" }) {
-  const tones = { default: "text-yellow-400 bg-yellow-400/10", amber: "text-amber-300 bg-amber-400/10", emerald: "text-emerald-300 bg-emerald-400/10", red: "text-red-300 bg-red-400/10" };
-  return <article className="rounded-2xl border border-white/10 bg-white/3 p-4"><span className={`flex size-9 items-center justify-center rounded-xl ${tones[tone]}`}><Icon size={18} /></span><p className="mt-4 text-xs text-white/40">{title}</p><p className="mt-1 text-2xl font-bold">{value}</p></article>;
+function Statistic({ title, value, icon: Icon, tone = "default" }: { title: string; value: number; icon: typeof ClipboardList; tone?: "default" | "amber" | "emerald" | "red" | "slate" }) {
+  const tones = { default: "border-yellow-400/20 bg-yellow-400/5 text-yellow-400", amber: "border-amber-400/25 bg-amber-400/8 text-amber-300", emerald: "border-emerald-400/25 bg-emerald-400/8 text-emerald-300", red: "border-rose-400/25 bg-rose-400/8 text-rose-300", slate: "border-slate-400/25 bg-slate-400/8 text-slate-300" };
+  return <article className={`rounded-2xl border p-4 ${tones[tone]}`}><Icon size={19} /><p className="mt-4 text-xs text-white/55">{title}</p><p className="mt-1 text-2xl font-bold text-white">{value}</p></article>;
 }
 
 function StatusBadge({ status }: { status: QuoteRequestStatus }) {

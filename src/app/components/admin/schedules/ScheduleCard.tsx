@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 import {
   BusFront,
   CalendarDays,
@@ -143,6 +145,20 @@ export function ScheduleCard({
   onEdit,
   onDelete,
 }: ScheduleCardProps) {
+  const [currentTime, setCurrentTime] = useState<number | null>(null);
+  useEffect(() => {
+    const updateClock = () => setCurrentTime(Date.now());
+    updateClock();
+    const timer = window.setInterval(updateClock, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const inProgress =
+    schedule.type === "booking" &&
+    schedule.status === "active" &&
+    currentTime !== null &&
+    schedule.startsAt.getTime() <= currentTime &&
+    currentTime < schedule.endsAt.getTime();
+
   const sameDay =
     isSameDay(
       schedule.startsAt,
@@ -195,6 +211,11 @@ export function ScheduleCard({
                 schedule.status
               }
             />
+            {inProgress && (
+              <span role="status" className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-300">
+                Em viagem · van ocupada
+              </span>
+            )}
           </div>
 
           {vehicleName && (

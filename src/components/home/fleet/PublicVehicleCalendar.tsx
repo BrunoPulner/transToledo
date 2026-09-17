@@ -588,6 +588,16 @@ export function PublicVehicleCalendar({
     setError,
   ] = useState("");
 
+  const [currentTime, setCurrentTime] =
+    useState<number | null>(null);
+
+  useEffect(() => {
+    const updateClock = () => setCurrentTime(Date.now());
+    updateClock();
+    const timer = window.setInterval(updateClock, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   /*
    * Impede navegação para meses
    * anteriores ao mês atual.
@@ -768,6 +778,15 @@ export function PublicVehicleCalendar({
           inspectionDay,
         )
       : [];
+
+  const activeTrip = currentTime === null
+    ? undefined
+    : busyPeriods.find(
+        (period) =>
+          period.type === "booking" &&
+          Date.parse(period.startsAt) <= currentTime &&
+          currentTime < Date.parse(period.endsAt),
+      );
 
   /*
    * Navega para o mês anterior.
@@ -1081,6 +1100,14 @@ if (
 
   return (
     <div className="w-full">
+      {!loading && !error && activeTrip && (
+        <div role="status" className="mb-4 rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-emerald-100">
+          <p className="text-xs font-bold uppercase tracking-wide">Van atualmente em viagem</p>
+          <p className="mt-1 text-xs leading-5 text-emerald-100/80">
+            Este veículo está ocupado até {dayFormatter.format(new Date(activeTrip.endsAt))} às {timeFormatter.format(new Date(activeTrip.endsAt))}. Selecione um horário após o retorno para uma nova viagem.
+          </p>
+        </div>
+      )}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_17rem]">
         {/* CALENDÁRIO */}
         <div className="min-w-0 rounded-2xl border border-white/8 bg-white/2 p-3 sm:p-4">
@@ -1521,7 +1548,9 @@ const partiallyOccupied =
       }`}
     >
       {period.type === "booking"
-        ? "Período já agendado"
+        ? currentTime !== null && Date.parse(period.startsAt) <= currentTime && currentTime < Date.parse(period.endsAt)
+          ? "Van em viagem agora"
+          : "Período já agendado"
         : "Veículo indisponível"}
     </p>
 
