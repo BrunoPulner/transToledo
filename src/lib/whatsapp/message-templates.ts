@@ -14,7 +14,7 @@ export const whatsappMessageTemplates: WhatsAppMessageTemplate[] = [
     preview:
       "Olá! Um novo orçamento foi recebido de {{1}} para {{2}}. Saída prevista para {{3}}. Acesse o painel da TransToledo para analisar.",
     variables: ["Nome do cliente", "Destino", "Data de saída"],
-    status: "not_configured",
+    status: "approved",
   },
   {
     key: "quote_approved",
@@ -32,7 +32,7 @@ export const whatsappMessageTemplates: WhatsAppMessageTemplate[] = [
       "Data da viagem",
       "Horário",
     ],
-    status: "not_configured",
+    status: "approved",
   },
   {
     key: "quote_rejected",
@@ -45,7 +45,7 @@ export const whatsappMessageTemplates: WhatsAppMessageTemplate[] = [
     preview:
       "Olá, {{1}}. No momento, não foi possível aprovar seu orçamento para {{2}}. Motivo: {{3}}. Se precisar, fale com a TransToledo.",
     variables: ["Nome do cliente", "Destino", "Motivo"],
-    status: "not_configured",
+    status: "approved",
   },
   {
     key: "trip_reminder_5h",
@@ -58,6 +58,6 @@ export const whatsappMessageTemplates: WhatsAppMessageTemplate[] = [
     preview:
       "Olá, {{1}}! Sua viagem com a TransToledo começa hoje às {{2}}. Faltam aproximadamente 5 horas. Local de saída: {{3}}.",
     variables: ["Nome do cliente", "Horário", "Local de saída"],
-    status: "not_configured",
+    status: "approved",
   },
 ];
