@@ -44,7 +44,7 @@ export const whatsappMessageTemplates: WhatsAppMessageTemplate[] = [
     trigger: "Quando o administrador recusar",
     preview:
       "Olá, {{1}}. No momento, não foi possível aprovar seu orçamento para {{2}}. Motivo: {{3}}. Se precisar, fale com a TransToledo.",
-    variables: ["Nome do cliente", "Destino", "Motivo"],
+    variables: ["Nome do cliente", "Destino", "Motivo", "Telefone da TransToledo"],
     status: "approved",
   },
   {

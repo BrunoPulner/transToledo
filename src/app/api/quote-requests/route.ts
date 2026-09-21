@@ -1,253 +1,329 @@
-import { FieldValue } from "firebase-admin/firestore";
-import { cookies } from "next/headers";
-import { NextResponse } from "next/server";
+import {
+  FieldValue,
+  Timestamp,
+} from "firebase-admin/firestore";
 
 import {
-  adminAuth,
+  NextResponse,
+} from "next/server";
+
+import {
   adminDb,
 } from "@/lib/firebase/admin";
 
-import type {
-  QuoteRequestStatus,
-} from "@/types/quote-request";
+import {
+  sendTrackedWhatsAppTemplate,
+} from "@/lib/whatsapp/sendTrackedWhatsAppTemplate";
 
-export const dynamic = "force-dynamic";
+import {
+  hashVerificationValue,
+  normalizeBrazilianPhone,
+  verifyPhoneVerificationToken,
+} from "@/lib/phone-verification";
 
-/*
- * GET
- *
- * Retorna as solicitações de orçamento
- * para o painel administrativo.
- */
-export async function GET() {
-  const administrator =
-    await getAdministrator();
+export const dynamic =
+  "force-dynamic";
 
-  if (!administrator) {
-    return unauthorized();
-  }
+type QuoteRequestBody = {
+  vehicleId?: unknown;
 
-  try {
-    const snapshot = await adminDb
-      .collection("quoteRequests")
-      .orderBy("createdAt", "desc")
-      .limit(200)
-      .get();
+  startsAt?: unknown;
+  endsAt?: unknown;
 
-    const requests = snapshot.docs.map(
-      (document) => {
-        const data = document.data();
+  tripMode?: unknown;
+  frequentTripId?: unknown;
+  tripName?: unknown;
 
-        return {
-          id: document.id,
+  origin?: unknown;
+  originLatitude?: unknown;
+  originLongitude?: unknown;
 
-          vehicleId: String(
-            data.vehicleId ?? "",
-          ),
+  destination?: unknown;
+  destinationLatitude?: unknown;
+  destinationLongitude?: unknown;
 
-          vehicleName: String(
-            data.vehicleName ?? "Veículo",
-          ),
+  passengers?: unknown;
+  notes?: unknown;
 
-          customer: {
-            name: String(
-              data.customer?.name ?? "",
-            ),
+  name?: unknown;
+  email?: unknown;
+  phone?: unknown;
 
-            email: String(
-              data.customer?.email ?? "",
-            ),
+  phoneVerificationToken?: unknown;
+};
 
-            phone: String(
-              data.customer?.phone ?? "",
-            ),
-          },
-
-          trip: {
-            mode:
-              data.trip?.mode === "registered"
-                ? "registered"
-                : "custom",
-
-            frequentTripId:
-              typeof data.trip?.frequentTripId ===
-              "string"
-                ? data.trip.frequentTripId
-                : null,
-
-            name: String(
-              data.trip?.name ?? "Viagem",
-            ),
-
-            origin: {
-              address: String(
-                data.trip?.origin?.address ?? "",
-              ),
-
-              latitude: Number(
-                data.trip?.origin?.latitude ?? 0,
-              ),
-
-              longitude: Number(
-                data.trip?.origin?.longitude ?? 0,
-              ),
-            },
-
-            destination: {
-              address: String(
-                data.trip?.destination?.address ?? "",
-              ),
-
-              latitude: Number(
-                data.trip?.destination?.latitude ?? 0,
-              ),
-
-              longitude: Number(
-                data.trip?.destination?.longitude ?? 0,
-              ),
-            },
-
-            passengers: Number(
-              data.trip?.passengers ?? 0,
-            ),
-
-            notes: String(
-              data.trip?.notes ?? "",
-            ),
-          },
-
-          startsAt: toIsoString(
-            data.startsAt,
-          ),
-
-          endsAt: toIsoString(
-            data.endsAt,
-          ),
-
-          status: readStatus(
-            data.status,
-          ),
-
-          source: String(
-            data.source ?? "quote_wizard",
-          ),
-
-          rejectionReason:
-            typeof data.rejectionReason === "string"
-              ? data.rejectionReason
-              : null,
-
-          cancellationReason:
-            typeof data.cancellationReason === "string"
-              ? data.cancellationReason
-              : null,
-
-          cancelledAt: toIsoString(
-            data.cancelledAt,
-            true,
-          ),
-
-          scheduleId:
-            typeof data.scheduleId === "string"
-              ? data.scheduleId
-              : null,
-
-          createdAt: toIsoString(
-            data.createdAt,
-            true,
-          ),
-
-          updatedAt: toIsoString(
-            data.updatedAt,
-            true,
-          ),
-
-          reviewedAt: toIsoString(
-            data.reviewedAt,
-            true,
-          ),
-
-          scheduledAt: toIsoString(
-            data.scheduledAt,
-            true,
-          ),
-        };
-      },
-    );
-
-    return NextResponse.json(
-      {
-        success: true,
-        requests,
-      },
-      {
-        headers: {
-          "Cache-Control": "no-store",
-        },
-      },
-    );
-  } catch (error) {
-    console.error(
-      "Erro ao carregar orçamentos:",
-      error,
-    );
-
-    return NextResponse.json(
-      {
-        success: false,
-        message:
-          "Não foi possível carregar os orçamentos.",
-      },
-      {
-        status: 500,
-      },
-    );
-  }
-}
+const whatsappDateFormat = new Intl.DateTimeFormat(
+  "pt-BR",
+  {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  },
+);
 
 /*
- * PATCH
+ * POST
  *
- * Aprova ou rejeita uma solicitação.
+ * Recebe uma nova solicitação de
+ * orçamento enviada pelo cliente.
  *
- * Quando aprovada, cria também o registro
- * na coleção vehicleSchedules.
+ * A solicitação é salva como pendente.
+ * Ela somente ocupará a agenda depois
+ * da aprovação administrativa.
  */
-export async function PATCH(
+export async function POST(
   request: Request,
 ) {
-  const administrator =
-    await getAdministrator();
-
-  if (!administrator) {
-    return unauthorized();
-  }
-
   try {
-    const body = (await request.json()) as {
-      quoteRequestId?: unknown;
-      decision?: unknown;
-      rejectionReason?: unknown;
-      cancellationReason?: unknown;
-    };
+    let body: QuoteRequestBody;
 
     /*
-     * Valida os dados básicos da decisão.
+     * Trata separadamente erros no JSON
+     * enviado pelo cliente.
+     */
+    try {
+      body =
+        (await request.json()) as
+          QuoteRequestBody;
+    } catch {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "O corpo da solicitação é inválido.",
+        },
+        {
+          status: 400,
+        },
+      );
+    }
+
+    /*
+     * Valida os tipos dos campos
+     * obrigatórios.
      */
     if (
-      typeof body.quoteRequestId !== "string" ||
-      !body.quoteRequestId.trim() ||
-      body.quoteRequestId.length > 128 ||
+      typeof body.vehicleId !== "string" ||
+      typeof body.startsAt !== "string" ||
+      typeof body.endsAt !== "string" ||
       (
-        body.decision !== "approved" &&
-        body.decision !== "rejected" &&
-        body.decision !== "cancelled"
+        body.tripMode !== "registered" &&
+        body.tripMode !== "custom"
+      ) ||
+      (
+        body.frequentTripId !== undefined &&
+        body.frequentTripId !== null &&
+        typeof body.frequentTripId !== "string"
+      ) ||
+      typeof body.tripName !== "string" ||
+      typeof body.origin !== "string" ||
+      typeof body.destination !== "string" ||
+      typeof body.passengers !== "number" ||
+      (
+        body.notes !== undefined &&
+        body.notes !== null &&
+        typeof body.notes !== "string"
+      ) ||
+      typeof body.name !== "string" ||
+      typeof body.email !== "string" ||
+      typeof body.phone !== "string" ||
+      typeof body.phoneVerificationToken !==
+        "string"
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Dados da solicitação incompletos.",
+        },
+        {
+          status: 400,
+        },
+      );
+    }
+
+    /*
+     * Normaliza os valores recebidos.
+     */
+    const vehicleId =
+      body.vehicleId.trim();
+
+    const startsAt =
+      new Date(body.startsAt);
+
+    const endsAt =
+      new Date(body.endsAt);
+
+    const tripMode:
+      | "registered"
+      | "custom" =
+      body.tripMode;
+
+    const frequentTripId =
+      typeof body.frequentTripId === "string"
+        ? body.frequentTripId.trim()
+        : "";
+
+    const tripName =
+      body.tripName.trim();
+
+    const origin =
+      body.origin.trim();
+
+    const destination =
+      body.destination.trim();
+
+    const passengers =
+      body.passengers;
+
+    const notes =
+      typeof body.notes === "string"
+        ? body.notes.trim()
+        : "";
+
+    const name =
+      body.name.trim();
+
+    const email =
+      body.email
+        .trim()
+        .toLowerCase();
+
+    const phone =
+      normalizeBrazilianPhone(
+        body.phone,
+      );
+
+    const phoneVerificationToken =
+      body.phoneVerificationToken.trim();
+
+    const originLatitude =
+      readCoordinate(
+        body.originLatitude,
+        -90,
+        90,
+      );
+
+    const originLongitude =
+      readCoordinate(
+        body.originLongitude,
+        -180,
+        180,
+      );
+
+    const destinationLatitude =
+      readCoordinate(
+        body.destinationLatitude,
+        -90,
+        90,
+      );
+
+    const destinationLongitude =
+      readCoordinate(
+        body.destinationLongitude,
+        -180,
+        180,
+      );
+
+    /*
+     * Valida o identificador do veículo.
+     */
+    if (
+      !vehicleId ||
+      vehicleId.length > 128
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "O veículo selecionado é inválido.",
+        },
+        {
+          status: 400,
+        },
+      );
+    }
+
+    /*
+     * Valida as datas da solicitação.
+     */
+    const now =
+      new Date();
+
+    if (
+      Number.isNaN(
+        startsAt.getTime(),
+      ) ||
+      Number.isNaN(
+        endsAt.getTime(),
+      ) ||
+      startsAt >= endsAt ||
+      startsAt <= now
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Confira o período solicitado.",
+        },
+        {
+          status: 400,
+        },
+      );
+    }
+
+    /*
+     * Valida as informações gerais
+     * da viagem.
+     */
+    if (
+      !tripName ||
+      tripName.length > 160 ||
+      !origin ||
+      origin.length > 500 ||
+      !destination ||
+      destination.length > 500 ||
+      originLatitude === null ||
+      originLongitude === null ||
+      destinationLatitude === null ||
+      destinationLongitude === null ||
+      !Number.isInteger(passengers) ||
+      passengers < 1 ||
+      passengers > 100 ||
+      notes.length > 1500
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Confira as informações da viagem.",
+        },
+        {
+          status: 400,
+        },
+      );
+    }
+
+    /*
+     * Uma viagem cadastrada precisa possuir
+     * o identificador da viagem.
+     */
+    if (
+      tripMode === "registered" &&
+      (
+        !frequentTripId ||
+        frequentTripId.length > 128
       )
     ) {
       return NextResponse.json(
         {
           success: false,
-          message: "Decisão inválida.",
+          message:
+            "A viagem selecionada é inválida.",
         },
         {
           status: 400,
@@ -255,43 +331,19 @@ export async function PATCH(
       );
     }
 
-    const quoteRequestId =
-      body.quoteRequestId.trim();
-
-    const decision = body.decision;
-
-    const rejectionReason =
-      typeof body.rejectionReason === "string"
-        ? body.rejectionReason.trim()
-        : "";
-
-    const cancellationReason =
-      typeof body.cancellationReason === "string"
-        ? body.cancellationReason.trim()
-        : "";
-
-    if (
-      decision === "cancelled" &&
-      (cancellationReason.length < 3 || cancellationReason.length > 500)
-    ) {
-      return NextResponse.json(
-        { success: false, message: "Informe um motivo de cancelamento entre 3 e 500 caracteres." },
-        { status: 400 },
-      );
-    }
-
     /*
-     * A recusa precisa ter uma justificativa.
+     * Uma viagem personalizada não deve
+     * possuir um frequentTripId.
      */
     if (
-      decision === "rejected" &&
-      rejectionReason.length < 3
+      tripMode === "custom" &&
+      frequentTripId
     ) {
       return NextResponse.json(
         {
           success: false,
           message:
-            "Informe o motivo da recusa.",
+            "Os dados da viagem personalizada são inválidos.",
         },
         {
           status: 400,
@@ -299,12 +351,21 @@ export async function PATCH(
       );
     }
 
-    if (rejectionReason.length > 500) {
+    /*
+     * Valida as informações do cliente.
+     */
+    if (
+      name.length < 3 ||
+      name.length > 120 ||
+      email.length > 160 ||
+      !isValidEmail(email) ||
+      !phone
+    ) {
       return NextResponse.json(
         {
           success: false,
           message:
-            "O motivo deve possuir no máximo 500 caracteres.",
+            "Confira suas informações de contato.",
         },
         {
           status: 400,
@@ -312,207 +373,187 @@ export async function PATCH(
       );
     }
 
-    const quoteReference = adminDb
-      .collection("quoteRequests")
-      .doc(quoteRequestId);
+    /*
+     * Valida o tamanho do token antes de
+     * executar sua verificação.
+     */
+    if (
+      !phoneVerificationToken ||
+      phoneVerificationToken.length > 2048
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "A confirmação do telefone é inválida ou expirou.",
+        },
+        {
+          status: 403,
+        },
+      );
+    }
 
     /*
-     * O agendamento utiliza o mesmo ID do
-     * orçamento. Isso impede que o mesmo
-     * orçamento gere dois agendamentos.
+     * Confirma que o telefone foi
+     * validado pelo WhatsApp.
      */
-    const scheduleReference = adminDb
-      .collection("vehicleSchedules")
-      .doc(quoteRequestId);
+    if (
+      !verifyPhoneVerificationToken(
+        phoneVerificationToken,
+        phone,
+      )
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "A confirmação do telefone é inválida ou expirou.",
+        },
+        {
+          status: 403,
+        },
+      );
+    }
 
-    const result = await adminDb.runTransaction(
+    /*
+     * Cria previamente a referência do
+     * novo orçamento.
+     */
+    const quoteReference =
+      adminDb
+        .collection(
+          "quoteRequests",
+        )
+        .doc();
+
+    /*
+     * O hash do token será utilizado como
+     * identificador para impedir reutilização.
+     */
+    const consumedTokenReference =
+      adminDb
+        .collection(
+          "consumedPhoneVerificationTokens",
+        )
+        .doc(
+          hashVerificationValue(
+            phoneVerificationToken,
+          ),
+        );
+
+    const vehicleReference =
+      adminDb
+        .collection(
+          "vehicles",
+        )
+        .doc(
+          vehicleId,
+        );
+
+    /*
+     * Consulta os agendamentos associados
+     * ao veículo.
+     *
+     * O conflito será filtrado dentro da
+     * transação considerando:
+     *
+     * status active
+     * type booking ou blocked
+     */
+    const schedulesQuery =
+      adminDb
+        .collection(
+          "vehicleSchedules",
+        )
+        .where(
+          "vehicleId",
+          "==",
+          vehicleId,
+        );
+
+    /*
+     * Quando for uma viagem cadastrada,
+     * também será validada a existência
+     * dela no Firestore.
+     */
+    const frequentTripReference =
+      tripMode === "registered"
+        ? adminDb
+            .collection(
+              "frequentTrips",
+            )
+            .doc(
+              frequentTripId,
+            )
+        : null;
+
+    /*
+     * A criação ocorre dentro de uma
+     * transação.
+     *
+     * Desse modo, a verificação do token,
+     * veículo, viagem e disponibilidade
+     * acontece junto com a gravação.
+     */
+    await adminDb.runTransaction(
       async (transaction) => {
         /*
-         * Carrega o orçamento dentro da transação.
+         * Todas as leituras são realizadas
+         * antes das gravações.
          */
-        const quoteSnapshot =
-          await transaction.get(
-            quoteReference,
+        const consumedTokenPromise =
+          transaction.get(
+            consumedTokenReference,
           );
 
-        if (!quoteSnapshot.exists) {
-          throw new QuoteDecisionError(
-            "Orçamento não encontrado.",
-            404,
+        const vehiclePromise =
+          transaction.get(
+            vehicleReference,
           );
-        }
 
-        const quoteData =
-          quoteSnapshot.data();
+        const schedulesPromise =
+          transaction.get(
+            schedulesQuery,
+          );
 
-        if (decision === "cancelled") {
-          if (quoteData?.status !== "approved") {
-            throw new QuoteDecisionError(
-              "Somente uma viagem aprovada pode ser cancelada.",
-              409,
-            );
-          }
+        const frequentTripPromise =
+          frequentTripReference
+            ? transaction.get(
+                frequentTripReference,
+              )
+            : Promise.resolve(null);
 
-          const linkedScheduleId = quoteData.scheduleId;
-          if (typeof linkedScheduleId !== "string" || linkedScheduleId !== quoteRequestId) {
-            throw new QuoteDecisionError("Agendamento vinculado ao orçamento não encontrado.", 409);
-          }
-
-          const linkedSchedule = await transaction.get(scheduleReference);
-          const scheduleData = linkedSchedule.data();
-          if (
-            !linkedSchedule.exists ||
-            scheduleData?.quoteRequestId !== quoteRequestId ||
-            scheduleData?.source !== "quote_request" ||
-            scheduleData?.type !== "booking" ||
-            scheduleData?.status !== "active" ||
-            scheduleData?.vehicleId !== quoteData.vehicleId
-          ) {
-            throw new QuoteDecisionError("A reserva vinculada não está ativa. Atualize a página antes de cancelar.", 409);
-          }
-
-          const linkedVehicle = adminDb.collection("vehicles").doc(String(quoteData.vehicleId));
-          const vehicleSnapshot = await transaction.get(linkedVehicle);
-          if (!vehicleSnapshot.exists) {
-            throw new QuoteDecisionError("Veículo da reserva não encontrado.", 409);
-          }
-
-          transaction.update(scheduleReference, {
-            status: "cancelled",
-            cancellationReason,
-            cancelledAt: FieldValue.serverTimestamp(),
-            updatedAt: FieldValue.serverTimestamp(),
-          });
-          transaction.update(quoteReference, {
-            status: "cancelled",
-            cancellationReason,
-            cancelledAt: FieldValue.serverTimestamp(),
-            cancelledBy: { uid: administrator.uid, email: administrator.email ?? null },
-            updatedAt: FieldValue.serverTimestamp(),
-          });
-          transaction.update(linkedVehicle, {
-            scheduleRevision: FieldValue.increment(1),
-            scheduleUpdatedAt: FieldValue.serverTimestamp(),
-          });
-
-          return { status: "cancelled" as const, scheduleId: scheduleReference.id };
-        }
+        const [
+          consumedTokenSnapshot,
+          vehicleSnapshot,
+          schedulesSnapshot,
+          frequentTripSnapshot,
+        ] = await Promise.all([
+          consumedTokenPromise,
+          vehiclePromise,
+          schedulesPromise,
+          frequentTripPromise,
+        ]);
 
         /*
-         * Somente orçamentos pendentes podem
-         * ser aprovados ou recusados.
+         * O mesmo token de confirmação
+         * não pode ser utilizado novamente.
          */
         if (
-          quoteData?.status !== "pending"
+          consumedTokenSnapshot.exists
         ) {
-          throw new QuoteDecisionError(
-            "Este orçamento já foi analisado.",
+          throw new QuoteRequestError(
+            "Esta confirmação já foi utilizada.",
             409,
           );
         }
 
         /*
-         * Na recusa não é criado nenhum
-         * agendamento para o veículo.
-         */
-        if (decision === "rejected") {
-          transaction.update(
-            quoteReference,
-            {
-              status: "rejected",
-
-              rejectionReason,
-
-              reviewedAt:
-                FieldValue.serverTimestamp(),
-
-              reviewedBy: {
-                uid: administrator.uid,
-                email:
-                  administrator.email ?? null,
-              },
-
-              updatedAt:
-                FieldValue.serverTimestamp(),
-            },
-          );
-
-          return {
-            status: "rejected" as const,
-            scheduleId: null,
-          };
-        }
-
-        /*
-         * A partir deste ponto o orçamento
-         * está sendo aprovado.
-         */
-        const vehicleId = String(
-          quoteData?.vehicleId ?? "",
-        ).trim();
-
-        const startsAt =
-          readFirestoreDate(
-            quoteData?.startsAt,
-          );
-
-        const endsAt =
-          readFirestoreDate(
-            quoteData?.endsAt,
-          );
-
-        if (
-          !vehicleId ||
-          !startsAt ||
-          !endsAt ||
-          startsAt >= endsAt
-        ) {
-          throw new QuoteDecisionError(
-            "O orçamento possui dados de agendamento inválidos.",
-            400,
-          );
-        }
-
-        const vehicleReference = adminDb
-          .collection("vehicles")
-          .doc(vehicleId);
-
-        const schedulesQuery = adminDb
-          .collection("vehicleSchedules")
-          .where(
-            "vehicleId",
-            "==",
-            vehicleId,
-          );
-
-        /*
-         * Todos os documentos necessários são
-         * lidos antes das gravações.
-         */
-        const [
-          vehicleSnapshot,
-          existingScheduleSnapshot,
-          schedulesSnapshot,
-        ] = await Promise.all([
-          transaction.get(
-            vehicleReference,
-          ),
-
-          transaction.get(
-            scheduleReference,
-          ),
-
-          transaction.get(
-            schedulesQuery,
-          ),
-        ]);
-
-        /*
-         * Confirma que o veículo ainda existe.
+         * Confirma que o veículo existe.
          */
         if (!vehicleSnapshot.exists) {
-          throw new QuoteDecisionError(
-            "O veículo deste orçamento não foi encontrado.",
+          throw new QuoteRequestError(
+            "O veículo selecionado não foi encontrado.",
             404,
           );
         }
@@ -526,27 +567,67 @@ export async function PATCH(
         if (
           vehicleData?.status !== "active"
         ) {
-          throw new QuoteDecisionError(
-            "O veículo deste orçamento não está ativo.",
+          throw new QuoteRequestError(
+            "O veículo não está mais disponível.",
             409,
           );
         }
 
         /*
-         * Proteção contra agendamento duplicado.
+         * Confirma que a quantidade de
+         * passageiros cabe no veículo.
+         *
+         * O fallback para capacity mantém
+         * compatibilidade com veículos antigos.
+         */
+        const vehicleCapacity =
+          Number(
+            vehicleData?.passengerCapacity ??
+            vehicleData?.capacity ??
+            0,
+          );
+
+        if (
+          !Number.isFinite(vehicleCapacity) ||
+          vehicleCapacity < 1
+        ) {
+          throw new QuoteRequestError(
+            "A capacidade do veículo não está configurada corretamente.",
+            409,
+          );
+        }
+
+        if (
+          passengers > vehicleCapacity
+        ) {
+          throw new QuoteRequestError(
+            "A quantidade de passageiros excede a capacidade do veículo.",
+            400,
+          );
+        }
+
+        /*
+         * Confirma que a viagem cadastrada
+         * existe e continua ativa.
          */
         if (
-          existingScheduleSnapshot.exists
+          tripMode === "registered" &&
+          (
+            !frequentTripSnapshot?.exists ||
+            frequentTripSnapshot
+              .data()
+              ?.active !== true
+          )
         ) {
-          throw new QuoteDecisionError(
-            "Este orçamento já possui um agendamento.",
-            409,
+          throw new QuoteRequestError(
+            "A viagem selecionada não está mais disponível.",
+            404,
           );
         }
 
         /*
-         * Revalida a disponibilidade no momento
-         * exato da aprovação.
+         * Verifica se o período solicitado
+         * atravessa algum agendamento ativo.
          *
          * Existe conflito quando:
          *
@@ -594,137 +675,130 @@ export async function PATCH(
           );
 
         if (hasConflict) {
-          throw new QuoteDecisionError(
-            "Não foi possível aprovar: o veículo já possui um agendamento neste período.",
+          throw new QuoteRequestError(
+            "Este período acabou de ficar indisponível. Escolha outro horário.",
             409,
           );
         }
 
         /*
-         * Cria o registro que ocupará a agenda.
+         * Para uma viagem cadastrada,
+         * utiliza o nome salvo no banco.
+         */
+        const savedTripName =
+          tripMode === "registered"
+            ? String(
+                frequentTripSnapshot
+                  ?.data()
+                  ?.name ??
+                  tripName,
+              )
+            : tripName;
+
+        /*
+         * Utiliza primeiro model e depois name
+         * para manter compatibilidade com os
+         * documentos existentes de veículos.
+         */
+        const vehicleName =
+          String(
+            vehicleData?.model ??
+            vehicleData?.name ??
+            "Veículo",
+          );
+
+        /*
+         * Salva a solicitação como pendente.
+         *
+         * Nenhum documento é criado em
+         * vehicleSchedules nesta etapa.
          */
         transaction.create(
-          scheduleReference,
+          quoteReference,
           {
             vehicleId,
-
-            vehicleName: String(
-              quoteData?.vehicleName ??
-                vehicleData?.model ??
-                vehicleData?.name ??
-                "Veículo",
-            ),
-
-            startsAt:
-              quoteData?.startsAt,
-
-            endsAt:
-              quoteData?.endsAt,
-
-            /*
-             * booking representa uma viagem
-             * confirmada pelo administrador.
-             */
-            type: "booking",
-
-            /*
-             * Somente registros ativos devem
-             * bloquear o calendário.
-             */
-            status: "active",
-
-            quoteRequestId,
-
-            source: "quote_request",
+            vehicleName,
 
             customer: {
-              name: String(
-                quoteData?.customer?.name ??
-                  "",
-              ),
-
-              email: String(
-                quoteData?.customer?.email ??
-                  "",
-              ),
-
-              phone: String(
-                quoteData?.customer?.phone ??
-                  "",
-              ),
+              name,
+              email,
+              phone,
             },
 
             trip: {
-              mode:
-                quoteData?.trip?.mode ===
-                "registered"
-                  ? "registered"
-                  : "custom",
+              mode: tripMode,
 
               frequentTripId:
-                typeof quoteData?.trip
-                  ?.frequentTripId ===
-                "string"
-                  ? quoteData.trip
-                      .frequentTripId
+                tripMode === "registered"
+                  ? frequentTripId
                   : null,
 
-              name: String(
-                quoteData?.trip?.name ??
-                  "Viagem",
-              ),
+              name:
+                savedTripName,
 
               origin: {
-                address: String(
-                  quoteData?.trip?.origin
-                    ?.address ?? "",
-                ),
+                address:
+                  origin,
 
-                latitude: Number(
-                  quoteData?.trip?.origin
-                    ?.latitude ?? 0,
-                ),
+                latitude:
+                  originLatitude,
 
-                longitude: Number(
-                  quoteData?.trip?.origin
-                    ?.longitude ?? 0,
-                ),
+                longitude:
+                  originLongitude,
               },
 
               destination: {
-                address: String(
-                  quoteData?.trip?.destination
-                    ?.address ?? "",
-                ),
+                address:
+                  destination,
 
-                latitude: Number(
-                  quoteData?.trip?.destination
-                    ?.latitude ?? 0,
-                ),
+                latitude:
+                  destinationLatitude,
 
-                longitude: Number(
-                  quoteData?.trip?.destination
-                    ?.longitude ?? 0,
-                ),
+                longitude:
+                  destinationLongitude,
               },
 
-              passengers: Number(
-                quoteData?.trip?.passengers ??
-                  0,
-              ),
-
-              notes: String(
-                quoteData?.trip?.notes ??
-                  "",
-              ),
+              passengers,
+              notes,
             },
 
-            createdBy: {
-              uid: administrator.uid,
+            startsAt:
+              Timestamp.fromDate(
+                startsAt,
+              ),
 
-              email:
-                administrator.email ?? null,
-            },
+            endsAt:
+              Timestamp.fromDate(
+                endsAt,
+              ),
+
+            status:
+              "pending",
+
+            source:
+              "quote_wizard",
+
+            /*
+             * Estes campos somente serão
+             * preenchidos após a aprovação.
+             */
+            scheduleId:
+              null,
+
+            scheduledAt:
+              null,
+
+            rejectionReason:
+              null,
+
+            reviewedAt:
+              null,
+
+            reviewedBy:
+              null,
+
+            phoneVerifiedAt:
+              FieldValue.serverTimestamp(),
 
             createdAt:
               FieldValue.serverTimestamp(),
@@ -735,105 +809,169 @@ export async function PATCH(
         );
 
         /*
-         * Marca o orçamento como aprovado e
-         * salva o vínculo com o agendamento.
+         * Marca o token como utilizado.
          */
-        transaction.update(
-          quoteReference,
+        transaction.create(
+          consumedTokenReference,
           {
-            status: "approved",
+            quoteRequestId:
+              quoteReference.id,
 
-            rejectionReason: null,
+            phone,
 
-            scheduleId:
-              scheduleReference.id,
-
-            scheduledAt:
+            createdAt:
               FieldValue.serverTimestamp(),
 
-            reviewedAt:
-              FieldValue.serverTimestamp(),
-
-            reviewedBy: {
-              uid: administrator.uid,
-
-              email:
-                administrator.email ?? null,
-            },
-
-            updatedAt:
-              FieldValue.serverTimestamp(),
+            /*
+             * Este documento pode ser removido
+             * automaticamente no futuro usando
+             * TTL do Firestore.
+             */
+            expiresAt:
+              Timestamp.fromMillis(
+                Date.now() +
+                  24 *
+                  60 *
+                  60 *
+                  1000,
+              ),
           },
         );
-
-        /*
-         * Atualiza uma versão no veículo.
-         *
-         * Isso também ajuda a evitar que duas
-         * aprovações simultâneas reservem o mesmo
-         * veículo no mesmo período.
-         */
-        transaction.update(
-          vehicleReference,
-          {
-            scheduleRevision:
-              FieldValue.increment(1),
-
-            scheduleUpdatedAt:
-              FieldValue.serverTimestamp(),
-          },
-        );
-
-        return {
-          status: "approved" as const,
-
-          scheduleId:
-            scheduleReference.id,
-        };
       },
     );
+
+    /*
+     * O orçamento já foi salvo neste ponto.
+     *
+     * Uma falha no envio da notificação não deve
+     * desfazer o orçamento nem retornar erro ao cliente.
+     */
+    const administratorPhone =
+      process.env.WHATSAPP_ADMIN_PHONE?.trim();
+
+    if (!administratorPhone) {
+      console.error(
+        "Orçamento criado, mas WHATSAPP_ADMIN_PHONE não está configurado.",
+        {
+          quoteRequestId:
+            quoteReference.id,
+        },
+      );
+    } else {
+      try {
+        const formattedDeparture =
+          whatsappDateFormat
+            .format(startsAt)
+            .replace(", ", " às ");
+
+        const messageResult =
+          await sendTrackedWhatsAppTemplate({
+            event:
+              "quote_created",
+
+            template:
+              "new_quote_admin",
+
+            to:
+              administratorPhone,
+
+            /*
+             * Ordem das variáveis do modelo:
+             * {{1}} cliente
+             * {{2}} destino
+             * {{3}} saída prevista
+             */
+            parameters: [
+              name,
+              destination,
+              formattedDeparture,
+            ],
+
+            idempotencyKey:
+              `quote-created:${quoteReference.id}:admin`,
+
+            quoteRequestId:
+              quoteReference.id,
+
+            scheduleId:
+              null,
+          });
+
+        console.info(
+          "Notificação de novo orçamento processada:",
+          {
+            quoteRequestId:
+              quoteReference.id,
+
+            status:
+              messageResult.status,
+
+            logId:
+              messageResult.logId,
+          },
+        );
+      } catch (error) {
+        console.error(
+          "Orçamento criado, mas não foi possível notificar o administrador pelo WhatsApp:",
+          {
+            quoteRequestId:
+              quoteReference.id,
+
+            error:
+              error instanceof Error
+                ? error.message
+                : error,
+          },
+        );
+      }
+    }
 
     return NextResponse.json(
       {
         success: true,
 
-        status: result.status,
-
-        scheduleId:
-          result.scheduleId,
+        quoteRequestId:
+          quoteReference.id,
       },
       {
+        status: 201,
+
         headers: {
-          "Cache-Control": "no-store",
+          "Cache-Control":
+            "no-store",
         },
       },
     );
   } catch (error) {
     if (
       error instanceof
-      QuoteDecisionError
+      QuoteRequestError
     ) {
       return NextResponse.json(
         {
           success: false,
-          message: error.message,
+
+          message:
+            error.message,
         },
         {
-          status: error.status,
+          status:
+            error.status,
         },
       );
     }
 
     console.error(
-      "Erro ao analisar orçamento:",
+      "Erro ao criar solicitação de orçamento:",
       error,
     );
 
     return NextResponse.json(
       {
         success: false,
+
         message:
-          "Não foi possível registrar a decisão.",
+          "Não foi possível salvar a solicitação.",
       },
       {
         status: 500,
@@ -843,69 +981,28 @@ export async function PATCH(
 }
 
 /*
- * Verifica a sessão administrativa.
+ * Valida uma latitude ou longitude.
  */
-async function getAdministrator() {
-  try {
-    const cookieStore =
-      await cookies();
-
-    const sessionCookie =
-      cookieStore.get(
-        "transtoledo_session",
-      )?.value;
-
-    if (!sessionCookie) {
-      return null;
-    }
-
-    return await adminAuth
-      .verifySessionCookie(
-        sessionCookie,
-        true,
-      );
-  } catch {
+function readCoordinate(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+): number | null {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
     return null;
   }
+
+  return value;
 }
 
 /*
- * Resposta utilizada quando a sessão
- * administrativa é inválida.
- */
-function unauthorized() {
-  return NextResponse.json(
-    {
-      success: false,
-      message:
-        "Sessão administrativa inválida.",
-    },
-    {
-      status: 401,
-    },
-  );
-}
-
-/*
- * Normaliza o status do orçamento.
- */
-function readStatus(
-  value: unknown,
-): QuoteRequestStatus {
-  if (
-    value === "approved" ||
-    value === "rejected" ||
-    value === "cancelled"
-  ) {
-    return value;
-  }
-
-  return "pending";
-}
-
-/*
- * Converte Timestamp do Firestore para
- * uma data JavaScript.
+ * Converte um Timestamp do Firestore
+ * para Date.
  */
 function readFirestoreDate(
   value: unknown,
@@ -949,26 +1046,24 @@ function readFirestoreDate(
 }
 
 /*
- * Converte Timestamp do Firestore para ISO.
+ * Validação simples de e-mail.
  */
-function toIsoString(
-  value: unknown,
-  nullable = false,
-): string | null {
-  const date =
-    readFirestoreDate(value);
-
-  if (date) {
-    return date.toISOString();
-  }
-
-  return nullable ? null : "";
+function isValidEmail(
+  email: string,
+): boolean {
+  return (
+    email.length <= 160 &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+      email,
+    )
+  );
 }
 
 /*
- * Erro controlado de aprovação ou recusa.
+ * Erro controlado da criação
+ * da solicitação.
  */
-class QuoteDecisionError extends Error {
+class QuoteRequestError extends Error {
   constructor(
     message: string,
     readonly status: number,
@@ -976,6 +1071,6 @@ class QuoteDecisionError extends Error {
     super(message);
 
     this.name =
-      "QuoteDecisionError";
+      "QuoteRequestError";
   }
 }

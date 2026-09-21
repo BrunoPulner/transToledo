@@ -7,11 +7,35 @@ import {
   adminDb,
 } from "@/lib/firebase/admin";
 
+import {
+  sendTrackedWhatsAppTemplate,
+} from "@/lib/whatsapp/sendTrackedWhatsAppTemplate";
+
 import type {
   QuoteRequestStatus,
 } from "@/types/quote-request";
 
 export const dynamic = "force-dynamic";
+
+const whatsappDateFormat = new Intl.DateTimeFormat(
+  "pt-BR",
+  {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  },
+);
+
+const whatsappTimeFormat = new Intl.DateTimeFormat(
+  "pt-BR",
+  {
+    timeZone: "America/Sao_Paulo",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  },
+);
 
 /*
  * GET
@@ -137,6 +161,16 @@ export async function GET() {
               ? data.rejectionReason
               : null,
 
+          cancellationReason:
+            typeof data.cancellationReason === "string"
+              ? data.cancellationReason
+              : null,
+
+          cancelledAt: toIsoString(
+            data.cancelledAt,
+            true,
+          ),
+
           scheduleId:
             typeof data.scheduleId === "string"
               ? data.scheduleId
@@ -218,6 +252,7 @@ export async function PATCH(
       quoteRequestId?: unknown;
       decision?: unknown;
       rejectionReason?: unknown;
+      cancellationReason?: unknown;
     };
 
     /*
@@ -229,7 +264,8 @@ export async function PATCH(
       body.quoteRequestId.length > 128 ||
       (
         body.decision !== "approved" &&
-        body.decision !== "rejected"
+        body.decision !== "rejected" &&
+        body.decision !== "cancelled"
       )
     ) {
       return NextResponse.json(
@@ -252,6 +288,21 @@ export async function PATCH(
       typeof body.rejectionReason === "string"
         ? body.rejectionReason.trim()
         : "";
+
+    const cancellationReason =
+      typeof body.cancellationReason === "string"
+        ? body.cancellationReason.trim()
+        : "";
+
+    if (
+      decision === "cancelled" &&
+      (cancellationReason.length < 3 || cancellationReason.length > 500)
+    ) {
+      return NextResponse.json(
+        { success: false, message: "Informe um motivo de cancelamento entre 3 e 500 caracteres." },
+        { status: 400 },
+      );
+    }
 
     /*
      * A recusa precisa ter uma justificativa.
@@ -318,6 +369,63 @@ export async function PATCH(
         const quoteData =
           quoteSnapshot.data();
 
+        if (decision === "cancelled") {
+          if (quoteData?.status !== "approved") {
+            throw new QuoteDecisionError(
+              "Somente uma viagem aprovada pode ser cancelada.",
+              409,
+            );
+          }
+
+          const linkedScheduleId = quoteData.scheduleId;
+          if (typeof linkedScheduleId !== "string" || linkedScheduleId !== quoteRequestId) {
+            throw new QuoteDecisionError("Agendamento vinculado ao orçamento não encontrado.", 409);
+          }
+
+          const linkedSchedule = await transaction.get(scheduleReference);
+          const scheduleData = linkedSchedule.data();
+          if (
+            !linkedSchedule.exists ||
+            scheduleData?.quoteRequestId !== quoteRequestId ||
+            scheduleData?.source !== "quote_request" ||
+            scheduleData?.type !== "booking" ||
+            scheduleData?.status !== "active" ||
+            scheduleData?.vehicleId !== quoteData.vehicleId
+          ) {
+            throw new QuoteDecisionError("A reserva vinculada não está ativa. Atualize a página antes de cancelar.", 409);
+          }
+
+          const linkedVehicle = adminDb.collection("vehicles").doc(String(quoteData.vehicleId));
+          const vehicleSnapshot = await transaction.get(linkedVehicle);
+          if (!vehicleSnapshot.exists) {
+            throw new QuoteDecisionError("Veículo da reserva não encontrado.", 409);
+          }
+
+          transaction.update(scheduleReference, {
+            status: "cancelled",
+            cancellationReason,
+            cancelledAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+          transaction.update(quoteReference, {
+            status: "cancelled",
+            cancellationReason,
+            cancelledAt: FieldValue.serverTimestamp(),
+            cancelledBy: { uid: administrator.uid, email: administrator.email ?? null },
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+          transaction.update(linkedVehicle, {
+            scheduleRevision: FieldValue.increment(1),
+            scheduleUpdatedAt: FieldValue.serverTimestamp(),
+          });
+
+          return {
+            status: "cancelled" as const,
+            scheduleId: scheduleReference.id,
+            notification: null,
+          };
+        }
+
         /*
          * Somente orçamentos pendentes podem
          * ser aprovados ou recusados.
@@ -360,6 +468,19 @@ export async function PATCH(
           return {
             status: "rejected" as const,
             scheduleId: null,
+            notification: {
+              customerName: String(
+                quoteData?.customer?.name ?? "Cliente",
+              ),
+              customerPhone: String(
+                quoteData?.customer?.phone ?? "",
+              ),
+              destination: String(
+                quoteData?.trip?.destination?.address ??
+                  quoteData?.trip?.name ??
+                  "destino informado",
+              ),
+            },
           };
         }
 
@@ -709,9 +830,119 @@ export async function PATCH(
 
           scheduleId:
             scheduleReference.id,
+
+          notification: {
+            customerName: String(
+              quoteData?.customer?.name ?? "Cliente",
+            ),
+            customerPhone: String(
+              quoteData?.customer?.phone ?? "",
+            ),
+            destination: String(
+              quoteData?.trip?.destination?.address ??
+                quoteData?.trip?.name ??
+                "destino informado",
+            ),
+            startsAt:
+              quoteData?.startsAt,
+          },
         };
       },
     );
+
+    /*
+     * A decisão já foi salva neste ponto.
+     * Uma falha no WhatsApp não deve desfazer a
+     * aprovação ou a recusa registrada no Firestore.
+     */
+    if (
+      result.status !== "cancelled" &&
+      result.notification
+    ) {
+      try {
+        if (result.status === "approved") {
+          const startsAt = readFirestoreDate(
+            result.notification.startsAt,
+          );
+
+          if (!startsAt) {
+            throw new Error(
+              "A data da viagem aprovada é inválida para a notificação.",
+            );
+          }
+
+          await sendTrackedWhatsAppTemplate({
+            event: "quote_approved",
+            template: "quote_approved",
+            to: result.notification.customerPhone,
+            parameters: [
+              result.notification.customerName,
+              result.notification.destination,
+              whatsappDateFormat.format(startsAt),
+              whatsappTimeFormat.format(startsAt),
+            ],
+            idempotencyKey:
+              `quote-approved:${quoteRequestId}:customer`,
+            quoteRequestId,
+            scheduleId: result.scheduleId,
+          });
+        } else {
+  const companyPhone =
+    process.env.WHATSAPP_COMPANY_PHONE_DISPLAY?.trim();
+
+  if (!companyPhone) {
+    throw new Error(
+      "WHATSAPP_COMPANY_PHONE_DISPLAY não está configurado.",
+    );
+  }
+
+  console.info("Preparando mensagem de recusa:", {
+    quoteRequestId,
+    phone: result.notification.customerPhone,
+    customer: result.notification.customerName,
+    destination: result.notification.destination,
+    rejectionReason,
+    companyPhone,
+  });
+
+  await sendTrackedWhatsAppTemplate({
+    event: "quote_rejected",
+    template: "quote_rejected",
+    to: result.notification.customerPhone,
+    parameters: [
+      result.notification.customerName, // {{1}}
+      result.notification.destination,  // {{2}}
+      rejectionReason,                  // {{3}}
+      companyPhone,                     // {{4}}
+    ],
+    idempotencyKey:
+      `quote-rejected:${quoteRequestId}:customer`,
+    quoteRequestId,
+    scheduleId: null,
+  });
+}
+
+        console.info(
+          "Notificação da decisão do orçamento processada:",
+          {
+            quoteRequestId,
+            status: result.status,
+          },
+        );
+      } catch (notificationError) {
+        console.error(
+          "Decisão registrada, mas não foi possível notificar o cliente pelo WhatsApp:",
+          {
+            quoteRequestId,
+            status: result.status,
+            error:
+              notificationError instanceof Error
+                ? notificationError.message
+                : notificationError,
+          },
+        );
+      }
+    }
 
     return NextResponse.json(
       {
@@ -814,7 +1045,8 @@ function readStatus(
 ): QuoteRequestStatus {
   if (
     value === "approved" ||
-    value === "rejected"
+    value === "rejected" ||
+    value === "cancelled"
   ) {
     return value;
   }

@@ -10,6 +10,7 @@ import {
   LoaderCircle,
   Mail,
   MapPin,
+  MessageCircle,
   Phone,
   RefreshCw,
   Route,
@@ -239,6 +240,19 @@ function QuoteDetails({ quote, updating, decision, reason, error, onClose, onCho
           {quote.rejectionReason && <div className="rounded-xl border border-red-400/20 bg-red-400/8 p-4"><p className="text-[9px] font-bold uppercase tracking-wider text-red-300">Motivo da recusa</p><p className="mt-2 text-xs leading-5 text-red-100/65">{quote.rejectionReason}</p></div>}
 
           {quote.cancellationReason && <div className="rounded-xl border border-slate-400/20 bg-slate-400/8 p-4"><p className="text-[9px] font-bold uppercase tracking-wider text-slate-300">Motivo do cancelamento</p><p className="mt-2 text-xs leading-5 text-white/70">{quote.cancellationReason}</p></div>}
+
+          {quote.status === "cancelled" && quote.cancellationReason && (
+            <div className="flex flex-col gap-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-bold text-emerald-200">Avisar o cliente</p>
+                <p className="mt-1 text-xs leading-5 text-white/50">A mensagem será aberta preenchida no WhatsApp para você revisar e enviar.</p>
+              </div>
+              <a href={createCancellationWhatsAppUrl(quote)} target="_blank" rel="noopener noreferrer" className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 text-xs font-bold text-black transition hover:bg-emerald-400">
+                <MessageCircle size={16} />
+                Avisar pelo WhatsApp
+              </a>
+            </div>
+          )}
           {error && <p role="alert" className="rounded-xl border border-red-400/30 bg-red-400/10 p-3 text-sm text-red-200">{error}</p>}
 
           {!decision && quote.status === "pending" && (
@@ -289,4 +303,26 @@ function formatDate(value: string | null) {
   if (!value) return "Não informada";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "Não informada" : dateFormatter.format(date);
+}
+
+function createCancellationWhatsAppUrl(
+  quote: QuoteRequestRecord,
+) {
+  const phoneDigits =
+    quote.customer.phone.replace(/\D/g, "");
+
+  const recipient = phoneDigits.startsWith("55")
+    ? phoneDigits
+    : `55${phoneDigits}`;
+
+  const message = [
+    `Olá, ${quote.customer.name}.`,
+    "",
+    "Informamos que a sua viagem com a TransToledo foi cancelada.",
+    `Motivo: ${quote.cancellationReason ?? "Entre em contato conosco para mais informações."}`,
+    "",
+    "Sentimos muito pelo ocorrido. Entre em contato conosco para que possamos orientar você e verificar as alternativas disponíveis.",
+  ].join("\n");
+
+  return `https://wa.me/${recipient}?text=${encodeURIComponent(message)}`;
 }
