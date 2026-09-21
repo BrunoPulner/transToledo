@@ -4,6 +4,8 @@ import { HomeLoading } from "@/components/ui/HomeLoading";
 import { AboutSection } from "@/components/home/AboutSection";
 import { FleetPreview } from "@/components/home/FleetPreview";
 import { DestinationsSection } from "./destinos/DestinationsSection";
+import { Footer } from "@/components/layout/Footer";
+import { FloatingWhatsApp } from "@/components/layout/FloatingWhatsApp";
 
 export default function Home() {
   return (
@@ -19,6 +21,10 @@ export default function Home() {
 
         <DestinationsSection />
       </main>
+
+      <Footer />
+
+      <FloatingWhatsApp />
     </>
   );
 }

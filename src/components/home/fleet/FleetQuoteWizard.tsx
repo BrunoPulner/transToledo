@@ -6,6 +6,18 @@ import {
 } from "react";
 
 import {
+  AnimatePresence,
+  motion,
+} from "framer-motion";
+
+import {
+  Clock3,
+  Headphones,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
+
+import {
   QuoteNavigation,
 } from "./QuoteNavigation";
 
@@ -49,6 +61,43 @@ const stepOrder: QuoteStep[] = [
   "contact",
   "review",
 ];
+
+const stepInformation: Record<
+  QuoteStep,
+  {
+    eyebrow: string;
+    title: string;
+    description: string;
+  }
+> = {
+  vehicle: {
+    eyebrow: "Primeira etapa",
+    title: "Escolha o veículo e o período",
+    description:
+      "Selecione a van ideal e consulte as datas disponíveis na agenda.",
+  },
+
+  trip: {
+    eyebrow: "Segunda etapa",
+    title: "Conte como será a viagem",
+    description:
+      "Informe o destino, o local de saída e a quantidade de passageiros.",
+  },
+
+  contact: {
+    eyebrow: "Terceira etapa",
+    title: "Preencha seus dados",
+    description:
+      "Precisamos destas informações para entrar em contato e preparar o orçamento.",
+  },
+
+  review: {
+    eyebrow: "Última etapa",
+    title: "Revise e envie sua solicitação",
+    description:
+      "Confira os dados da viagem antes de encaminhar o pedido para nossa equipe.",
+  },
+};
 
 type SubmitQuoteResponse = {
   success?: boolean;
@@ -682,173 +731,300 @@ export function FleetQuoteWizard() {
     }
   }
 
+  const currentStepIndex =
+  stepOrder.indexOf(currentStep);
+
+const currentStepInformation =
+  stepInformation[currentStep];
+
   return (
-    <section
-      id="frota"
-      className="
-        relative
-        isolate
-        scroll-mt-28
-        overflow-x-clip
-        bg-slate-950
-        py-12
-        text-white
-        lg:min-h-[calc(100vh-112px)]
-      "
-    >
-      <div
-        className="
-          pointer-events-none
-          absolute
-          -left-40
-          top-20
-          size-96
-          rounded-full
-          bg-yellow-400/8
-          blur-3xl
-        "
-      />
+  <section
+    id="frota"
+    className="relative isolate overflow-x-clip bg-[#050914] py-14 text-white lg:min-h-[calc(100vh-72px)] lg:py-18"
+  >
+    {/* GRADE DE FUNDO */}
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 opacity-[0.035]"
+      style={{
+        backgroundImage:
+          "linear-gradient(to right, white 1px, transparent 1px), linear-gradient(to bottom, white 1px, transparent 1px)",
+        backgroundSize: "48px 48px",
+      }}
+    />
 
-      <div
-        className="
-          pointer-events-none
-          absolute
-          -right-40
-          bottom-0
-          size-96
-          rounded-full
-          bg-yellow-400/6
-          blur-3xl
-        "
-      />
+    {/* LUZ AMARELA */}
+    <motion.div
+      aria-hidden="true"
+      animate={{
+        scale: [1, 1.18, 1],
+        opacity: [0.09, 0.17, 0.09],
+      }}
+      transition={{
+        duration: 8,
+        repeat: Infinity,
+        ease: "easeInOut",
+      }}
+      className="pointer-events-none absolute -left-50 top-10 size-125 rounded-full bg-yellow-400 blur-[150px]"
+    />
 
-      <div
-        className="
-          relative
-          mx-auto
-          w-full
-          max-w-375
-          px-4
-          sm:px-5
-          lg:px-10
-        "
+    {/* LUZ AZUL */}
+    <motion.div
+      aria-hidden="true"
+      animate={{
+        scale: [1.1, 1, 1.1],
+        opacity: [0.06, 0.12, 0.06],
+      }}
+      transition={{
+        duration: 10,
+        repeat: Infinity,
+        ease: "easeInOut",
+      }}
+      className="pointer-events-none absolute -right-60 bottom-0 size-140 rounded-full bg-blue-600 blur-[170px]"
+    />
+
+    <div className="relative mx-auto w-full max-w-375 px-4 sm:px-5 lg:px-10">
+      {/* CABEÇALHO */}
+      <motion.header
+        initial={{
+          opacity: 0,
+          y: 25,
+        }}
+        whileInView={{
+          opacity: 1,
+          y: 0,
+        }}
+        viewport={{
+          once: true,
+          amount: 0.4,
+        }}
+        transition={{
+          duration: 0.7,
+          ease: [0.22, 1, 0.36, 1],
+        }}
+        className="mb-8"
       >
-        <header className="mb-6">
-          <p
-            className="
-              text-xs
-              font-bold
-              uppercase
-              tracking-[0.18em]
-              text-yellow-400
-            "
-          >
-            Solicite seu orçamento
-          </p>
+        <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-yellow-400/25 bg-yellow-400/8 px-4 py-2">
+              <motion.span
+                animate={{
+                  rotate: [0, 12, -8, 0],
+                  scale: [1, 1.15, 1],
+                }}
+                transition={{
+                  duration: 3,
+                  repeat: Infinity,
+                  repeatDelay: 2,
+                }}
+              >
+                <Sparkles
+                  size={15}
+                  className="text-yellow-400"
+                />
+              </motion.span>
 
-          <h2
-            className="
-              mt-2
-              text-2xl
-              font-bold
-              tracking-tight
-              sm:text-3xl
-              lg:text-4xl
-            "
-          >
-            Planeje sua viagem com a
-            TransToledo
-          </h2>
+              <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-yellow-400">
+                Solicite seu orçamento
+              </span>
+            </div>
 
-          <p
-            className="
-              mt-2
-              max-w-2xl
-              text-sm
-              leading-6
-              text-white/50
-            "
-          >
-            Escolha a van, consulte a
-            agenda, informe o destino e
-            envie sua solicitação para
-            nossa equipe.
-          </p>
-        </header>
+            <h2 className="mt-5 font-(family-name:--font-montserrat) text-2xl font-bold leading-tight tracking-tight sm:whitespace-nowrap sm:text-4xl lg:text-5xl">
+  Planeje sua viagem{" "}
+  <span className="bg-linear-to-r from-yellow-300 via-yellow-400 to-amber-500 bg-clip-text text-transparent">
+    com facilidade
+  </span>
+</h2>
 
-        <QuoteStepper
-          currentStep={
-            currentStep
-          }
-          completedSteps={
-            completedSteps
-          }
-          onStepChange={
-            handleStepChange
-          }
-        />
+            <p className="mt-4 max-w-2xl text-sm leading-6 text-white/55 sm:text-base">
+              Siga as quatro etapas abaixo. Você escolhe
+              o veículo e informa os detalhes; nossa equipe
+              prepara o orçamento.
+            </p>
+          </div>
 
-        <div
-          className="
-            mt-5
-            min-h-90
-            rounded-3xl
-            border
-            border-white/10
-            bg-[#121620]
-            p-4
-            shadow-2xl
-            shadow-black/20
-            sm:p-6
-          "
-        >
-          {renderCurrentStep()}
+          {/* VANTAGENS */}
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 lg:flex lg:max-w-xl">
+            <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/4 px-3 py-2.5 text-xs text-white/65 backdrop-blur-sm">
+              <Clock3
+                size={16}
+                className="shrink-0 text-yellow-400"
+              />
+
+              Processo rápido
+            </div>
+
+            <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/4 px-3 py-2.5 text-xs text-white/65 backdrop-blur-sm">
+              <ShieldCheck
+                size={16}
+                className="shrink-0 text-emerald-400"
+              />
+
+              Sem compromisso
+            </div>
+
+            <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/4 px-3 py-2.5 text-xs text-white/65 backdrop-blur-sm">
+              <Headphones
+                size={16}
+                className="shrink-0 text-sky-400"
+              />
+
+              Atendimento humano
+            </div>
+          </div>
+        </div>
+      </motion.header>
+
+      {/* ÁREA DO PROGRESSO */}
+      <motion.div
+        initial={{
+          opacity: 0,
+          y: 20,
+        }}
+        whileInView={{
+          opacity: 1,
+          y: 0,
+        }}
+        viewport={{
+          once: true,
+          amount: 0.2,
+        }}
+        transition={{
+          duration: 0.7,
+          delay: 0.1,
+        }}
+        className="rounded-3xl border border-white/10 bg-white/[0.035] p-2 shadow-2xl shadow-black/20 backdrop-blur-xl sm:p-3"
+      >
+        <div className="mb-3 flex items-center justify-between px-2 pt-1 sm:px-3">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/35">
+              Seu progresso
+            </p>
+
+            <p className="mt-1 text-xs text-white/60">
+              Etapa {currentStepIndex + 1} de{" "}
+              {stepOrder.length}
+            </p>
+          </div>
+
+          <div className="rounded-full border border-yellow-400/20 bg-yellow-400/8 px-3 py-1.5 text-xs font-semibold text-yellow-400">
+            {Math.round(
+              ((currentStepIndex + 1) /
+                stepOrder.length) *
+                100
+            )}
+            % do formulário
+          </div>
         </div>
 
-        <div
-          className="
-            sticky
-            bottom-0
-            z-20
-            -mx-4
-            mt-6
-            bg-linear-to-t
-            from-slate-950
-            via-slate-950/95
-            to-transparent
-            px-4
-            pb-[max(1rem,env(safe-area-inset-bottom))]
-            pt-5
-            sm:-mx-5
-            sm:px-5
-            lg:-mx-10
-            lg:px-10
-          "
-        >
+        <QuoteStepper
+          currentStep={currentStep}
+          completedSteps={completedSteps}
+          onStepChange={handleStepChange}
+        />
+      </motion.div>
+
+      {/* CONTEÚDO DA ETAPA */}
+      <motion.div
+        initial={{
+          opacity: 0,
+          y: 25,
+        }}
+        whileInView={{
+          opacity: 1,
+          y: 0,
+        }}
+        viewport={{
+          once: true,
+          amount: 0.1,
+        }}
+        transition={{
+          duration: 0.7,
+          delay: 0.15,
+        }}
+        className="relative mt-6 overflow-hidden rounded-3xl border border-white/10 bg-[#101520]/95 shadow-2xl shadow-black/30 backdrop-blur-xl"
+      >
+        {/* LINHA SUPERIOR */}
+        <div className="absolute left-0 right-0 top-0 h-px bg-linear-to-r from-transparent via-yellow-400/70 to-transparent" />
+
+        {/* CABEÇALHO DA ETAPA */}
+        <div className="flex flex-col gap-4 border-b border-white/8 bg-white/2.5 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div className="flex items-start gap-4">
+            <div className="relative flex size-11 shrink-0 items-center justify-center rounded-2xl bg-yellow-400 font-bold text-black shadow-lg shadow-yellow-400/20">
+              {currentStepIndex + 1}
+
+              <span className="absolute -right-1 -top-1 size-3 rounded-full border-2 border-[#101520] bg-emerald-400" />
+            </div>
+
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-yellow-400">
+                {currentStepInformation.eyebrow}
+              </p>
+
+              <h3 className="mt-1 font-(family-name:--font-montserrat) text-lg font-bold text-white sm:text-xl">
+                {currentStepInformation.title}
+              </h3>
+
+              <p className="mt-1 max-w-2xl text-xs leading-5 text-white/45 sm:text-sm">
+                {currentStepInformation.description}
+              </p>
+            </div>
+          </div>
+
+          <div className="hidden items-center gap-2 rounded-full border border-white/8 bg-white/4 px-3 py-2 text-xs text-white/45 lg:flex">
+            <ShieldCheck
+              size={15}
+              className="text-emerald-400"
+            />
+
+            Seus dados estão seguros
+          </div>
+        </div>
+
+        {/* CONTEÚDO DINÂMICO */}
+        <div className="min-h-90 p-4 sm:p-6">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentStep}
+              initial={{
+                opacity: 0,
+                x: 20,
+              }}
+              animate={{
+                opacity: 1,
+                x: 0,
+              }}
+              exit={{
+                opacity: 0,
+                x: -20,
+              }}
+              transition={{
+                duration: 0.3,
+                ease: "easeOut",
+              }}
+            >
+              {renderCurrentStep()}
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      </motion.div>
+
+      {/* NAVEGAÇÃO FIXA */}
+      <div className="sticky bottom-0 z-20 -mx-4 mt-6 bg-linear-to-t from-[#050914] via-[#050914]/98 to-transparent px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-6 sm:-mx-5 sm:px-5 lg:-mx-10 lg:px-10">
+        <div className="rounded-2xl border border-white/10 bg-[#101520]/95 p-3 shadow-2xl shadow-black/40 backdrop-blur-xl sm:p-4">
           <QuoteNavigation
-            currentStep={
-              currentStep
-            }
-            canContinue={
-              canContinue
-            }
-            isSubmitting={
-              isSubmitting
-            }
-            submissionComplete={
-              Boolean(
-                submittedQuoteId,
-              )
-            }
-            onBack={
-              goToPreviousStep
-            }
-            onContinue={
-              goToNextStep
-            }
+            currentStep={currentStep}
+            canContinue={canContinue}
+            isSubmitting={isSubmitting}
+            submissionComplete={Boolean(
+              submittedQuoteId
+            )}
+            onBack={goToPreviousStep}
+            onContinue={goToNextStep}
           />
         </div>
       </div>
-    </section>
-  );
+    </div>
+  </section>
+);
 }

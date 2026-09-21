@@ -160,15 +160,19 @@ export function Header() {
       .filter((section): section is HTMLElement => Boolean(section));
 
     const handleSectionScroll = () => {
-      const visibleSection = [...sections]
-        .reverse()
-        .find(
-          (section) =>
-            section.getBoundingClientRect().top <= 180,
-        );
+  const compactHeaderHeight =
+    window.innerWidth >= 1024 ? 72 : 80;
 
-      setActiveSection(visibleSection?.id ?? "inicio");
-    };
+  const visibleSection = [...sections]
+    .reverse()
+    .find(
+      (section) =>
+        section.getBoundingClientRect().top <=
+        compactHeaderHeight + 24
+    );
+
+  setActiveSection(visibleSection?.id ?? "inicio");
+};
 
     handleSectionScroll();
 
@@ -205,6 +209,37 @@ export function Header() {
     };
   }, [menuOpen]);
 
+
+  /*
+ * AJUSTA O DESLOCAMENTO DAS ÂNCORAS
+ * CONFORME A ALTURA DO HEADER COMPACTO
+ */
+useEffect(() => {
+  const updateScrollPadding = () => {
+    const compactHeaderHeight =
+      window.innerWidth >= 1024 ? 72 : 80;
+
+    document.documentElement.style.scrollPaddingTop =
+      `${compactHeaderHeight}px`;
+  };
+
+  updateScrollPadding();
+
+  window.addEventListener(
+    "resize",
+    updateScrollPadding
+  );
+
+  return () => {
+    window.removeEventListener(
+      "resize",
+      updateScrollPadding
+    );
+
+    document.documentElement.style.scrollPaddingTop = "";
+  };
+}, []);
+
   /*
    * VERIFICA ITEM ATIVO
    */
@@ -227,10 +262,51 @@ export function Header() {
     return pathname.startsWith(href);
   }
 
-  function handleNavigation(id: string) {
-    setActiveSection(id);
-    setMenuOpen(false);
+  function handleNavigation(
+  event: React.MouseEvent<HTMLAnchorElement>,
+  id: string
+) {
+  setActiveSection(id);
+  setMenuOpen(false);
+
+  if (pathname !== "/") {
+    return;
   }
+
+  event.preventDefault();
+
+  if (id === "inicio") {
+    window.history.pushState(null, "", "/");
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+
+    return;
+  }
+
+  const section = document.getElementById(id);
+
+  if (!section) {
+    return;
+  }
+
+  const compactHeaderHeight =
+    window.innerWidth >= 1024 ? 72 : 80;
+
+  const sectionTop =
+    section.getBoundingClientRect().top +
+    window.scrollY -
+    compactHeaderHeight;
+
+  window.history.pushState(null, "", `/#${id}`);
+
+  window.scrollTo({
+    top: sectionTop,
+    behavior: "smooth",
+  });
+}
 
   /*
    * DESTINO DA ÁREA ADMINISTRATIVA
@@ -265,8 +341,8 @@ export function Header() {
           <Link
             href="/"
             className="relative z-50 flex items-center"
-            onClick={() =>
-              handleNavigation("inicio")
+            onClick={(event) =>
+              handleNavigation(event, "inicio")
             }
             aria-label="Ir para o início"
           >
@@ -298,8 +374,8 @@ export function Header() {
                 <Link
                   key={item.id}
                   href={item.href}
-                  onClick={() =>
-                    handleNavigation(item.id)
+                  onClick={(event) =>
+                    handleNavigation(event, item.id)
                   }
                   className={`group relative text-sm font-medium transition-[padding,color] duration-500 motion-reduce:transition-none ${
                     scrolled ? "py-2" : "py-3"
@@ -410,8 +486,8 @@ export function Header() {
                 <Link
                   key={item.id}
                   href={item.href}
-                  onClick={() =>
-                    handleNavigation(item.id)
+                  onClick={(event) =>
+                    handleNavigation(event, item.id)
                   }
                   className="group relative flex w-full items-center justify-center py-4 text-center font-(family-name:--font-montserrat) text-2xl font-bold"
                 >
@@ -440,16 +516,14 @@ export function Header() {
           {/* ÁREA ADMINISTRATIVA MOBILE */}
           {!checkingAuth && (
             <Link
-              href={adminHref}
-              onClick={() =>
-                setMenuOpen(false)
-              }
-              className="mt-9 flex items-center justify-center gap-2 rounded-full bg-yellow-400 px-7 py-3 text-sm font-bold text-black transition duration-300 hover:scale-[1.03] hover:bg-yellow-300"
-            >
-              <LockKeyhole size={16} />
+  href={adminHref}
+  onClick={() => setMenuOpen(false)}
+  className="mt-9 flex items-center justify-center gap-2 rounded-full bg-yellow-400 px-7 py-3 text-sm font-bold text-black transition duration-300 hover:scale-[1.03] hover:bg-yellow-300"
+>
+  <LockKeyhole size={16} />
 
-              {adminLabel}
-            </Link>
+  {adminLabel}
+</Link>
           )}
         </div>
       </div>
