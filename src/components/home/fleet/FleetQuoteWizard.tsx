@@ -1011,7 +1011,7 @@ const currentStepInformation =
 
       {/* NAVEGAÇÃO FIXA */}
       <div className="sticky bottom-0 z-20 -mx-4 mt-6 bg-linear-to-t from-[#050914] via-[#050914]/98 to-transparent px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-6 sm:-mx-5 sm:px-5 lg:-mx-10 lg:px-10">
-        <div className="rounded-2xl border border-white/10 bg-[#101520]/95 p-3 shadow-2xl shadow-black/40 backdrop-blur-xl sm:p-4">
+        
           <QuoteNavigation
             currentStep={currentStep}
             canContinue={canContinue}
@@ -1022,7 +1022,7 @@ const currentStepInformation =
             onBack={goToPreviousStep}
             onContinue={goToNextStep}
           />
-        </div>
+        
       </div>
     </div>
   </section>
