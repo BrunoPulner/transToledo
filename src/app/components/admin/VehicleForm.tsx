@@ -19,6 +19,7 @@ import {
   useState,
 } from "react";
 
+import { convertToWebp } from "@/lib/images/convertToWebp";
 import { createVehicle } from "@/services/vehicles/createVehicle";
 import { deleteVehicleMedia } from "@/services/vehicles/deleteVehicleMedia";
 import { updateVehicle } from "@/services/vehicles/updateVehicle";
@@ -179,6 +180,8 @@ export function VehicleForm({
   >([]);
 
   const [submitting, setSubmitting] = useState(false);
+  const [processingImages, setProcessingImages] = useState(false);
+  const processingRef = useRef(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -231,74 +234,103 @@ export function VehicleForm({
     }));
   }
 
-  function handleMediaChange(
+  async function handleMediaChange(
     event: ChangeEvent<HTMLInputElement>,
   ) {
     const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
 
-    if (files.length === 0) {
+    if (files.length === 0 || processingRef.current || submitting) {
       return;
     }
 
+    processingRef.current = true;
+    setProcessingImages(true);
     setError("");
     setMessage("");
 
     const acceptedMedia: SelectedMedia[] = [];
+    const errors: string[] = [];
 
-    for (const file of files) {
-      const isImage = [
-        "image/jpeg",
-        "image/png",
-        "image/webp",
-      ].includes(file.type);
+    try {
+      for (const file of files) {
+        const isImage = [
+          "image/jpeg",
+          "image/png",
+          "image/webp",
+        ].includes(file.type);
 
-      const isVideo = file.type === "video/mp4";
+        const isVideo = file.type === "video/mp4";
 
-      if (!isImage && !isVideo) {
-        setError(
-          `O arquivo "${file.name}" não possui um formato permitido.`,
-        );
-        continue;
+        if (!isImage && !isVideo) {
+          errors.push(
+            `O arquivo "${file.name}" não possui um formato permitido.`,
+          );
+          continue;
+        }
+
+        if (isVideo && file.size > 100 * 1024 * 1024) {
+          errors.push(
+            `O vídeo "${file.name}" ultrapassa o limite de 100 MB.`,
+          );
+          continue;
+        }
+
+        try {
+          const processedFile = isImage
+            ? await convertToWebp(file)
+            : file;
+
+          acceptedMedia.push({
+            id: crypto.randomUUID(),
+            file: processedFile,
+            previewUrl: URL.createObjectURL(processedFile),
+            type: isImage ? "image" : "video",
+            isCover: false,
+          });
+
+          if (isImage) {
+            const reduction =
+              (1 - processedFile.size / file.size) * 100;
+
+            console.info(
+              `[Frota] ${file.name}: ` +
+                `${(file.size / 1024).toFixed(0)} KB → ` +
+                `${(processedFile.size / 1024).toFixed(0)} KB ` +
+                `(${reduction.toFixed(1)}% de redução)`,
+            );
+          }
+        } catch (conversionError) {
+          console.error(conversionError);
+          errors.push(
+            `Não foi possível processar "${file.name}".`,
+          );
+        }
       }
 
-      const maximumSize = isImage
-        ? 10 * 1024 * 1024
-        : 100 * 1024 * 1024;
+      if (acceptedMedia.length > 0) {
+        setSelectedMedia((currentMedia) => {
+          const alreadyHasCover =
+            existingMedia.some((media) => media.isCover) ||
+            currentMedia.some((media) => media.isCover);
 
-      if (file.size > maximumSize) {
-        setError(
-          `O arquivo "${file.name}" ultrapassa o limite permitido.`,
-        );
-        continue;
+          return [
+            ...currentMedia,
+            ...acceptedMedia.map((media, index) => ({
+              ...media,
+              isCover: !alreadyHasCover && index === 0,
+            })),
+          ];
+        });
       }
 
-      acceptedMedia.push({
-        id: crypto.randomUUID(),
-        file,
-        previewUrl: URL.createObjectURL(file),
-        type: isImage ? "image" : "video",
-        isCover: false,
-      });
+      if (errors.length > 0) {
+        setError(errors.join(" "));
+      }
+    } finally {
+      processingRef.current = false;
+      setProcessingImages(false);
     }
-
-    if (acceptedMedia.length === 0) {
-      event.target.value = "";
-      return;
-    }
-
-    const alreadyHasCover =
-      existingMedia.some((media) => media.isCover) ||
-      selectedMedia.some((media) => media.isCover);
-
-    setSelectedMedia((currentMedia) => [
-      ...currentMedia,
-      ...acceptedMedia.map((media, index) => ({
-        ...media,
-        isCover: !alreadyHasCover && index === 0,
-      })),
-    ]);
-
-    event.target.value = "";
   }
 
   function selectCover(media: DisplayMedia) {
@@ -486,6 +518,8 @@ export function VehicleForm({
     event: FormEvent<HTMLFormElement>,
   ) {
     event.preventDefault();
+
+    if (processingRef.current || submitting) return;
 
     setError("");
     setMessage("");
@@ -812,17 +846,26 @@ export function VehicleForm({
 
         <button
           type="button"
-          onClick={() =>
-            fileInputRef.current?.click()
-          }
-          className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-700 bg-zinc-900 px-5 py-8 text-zinc-300 transition hover:border-yellow-400 hover:text-yellow-300"
+          disabled={processingImages || submitting}
+          onClick={() => fileInputRef.current?.click()}
+          className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-700 bg-zinc-900 px-5 py-8 text-zinc-300 transition hover:border-yellow-400 hover:text-yellow-300 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <Upload size={20} />
-          Selecionar fotos ou vídeos
+          {processingImages ? (
+            <>
+              <LoaderCircle size={20} className="animate-spin" />
+              Convertendo e otimizando imagens...
+            </>
+          ) : (
+            <>
+              <Upload size={20} />
+              Selecionar fotos ou vídeos
+            </>
+          )}
         </button>
 
         <p className="mt-3 text-xs text-zinc-500">
-          JPG, PNG ou WEBP até 10 MB. MP4 até 100 MB.
+          JPG, PNG e WebP são convertidos e otimizados automaticamente
+          antes do envio. Vídeos MP4 até 100 MB.
         </p>
 
         {displayMedia.length > 0 && (
@@ -926,7 +969,7 @@ export function VehicleForm({
       <div className="flex justify-end">
         <button
           type="submit"
-          disabled={submitting}
+          disabled={submitting || processingImages}
           className="flex min-w-48 items-center justify-center gap-2 rounded-xl bg-yellow-400 px-6 py-3 font-semibold text-black transition hover:bg-yellow-300 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {submitting ? (
