@@ -8,6 +8,7 @@ import {
   Usb,
   Wifi,
 } from "lucide-react";
+
 import type { VehicleFeatures } from "@/types/vehicles";
 
 const featureItems = [
@@ -21,23 +22,42 @@ const featureItems = [
   ["refrigerator", "Geladeira", Refrigerator],
 ] as const;
 
-export function VehicleFeatureList({ features }: { features: VehicleFeatures }) {
+type VehicleFeatureListProps = {
+  features: VehicleFeatures;
+};
+
+export function VehicleFeatureList({ features }: VehicleFeatureListProps) {
   const enabled = featureItems.filter(([key]) => features[key]);
 
   return (
-    <section>
-      <h3 className="text-sm font-bold text-white">Conforto e benefícios</h3>
-      {enabled.length ? (
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+    <section aria-labelledby="vehicle-features-title">
+      <h3
+        id="vehicle-features-title"
+        className="text-xs font-bold text-white sm:text-sm"
+      >
+        Conforto e benefícios
+      </h3>
+
+      {enabled.length > 0 ? (
+        <ul className="mt-2.5 grid grid-cols-2 gap-1.5">
           {enabled.map(([key, label, Icon]) => (
-            <div key={key} className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3 text-xs text-white/70">
-              <span className="flex size-8 items-center justify-center rounded-lg bg-yellow-400/10 text-yellow-400"><Icon size={16} /></span>
-              {label}
-            </div>
+            <li
+              key={key}
+              className="flex min-w-0 items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-[11px] leading-4 text-white/75"
+            >
+              <Icon
+                size={14}
+                aria-hidden="true"
+                className="shrink-0 text-yellow-400"
+              />
+              <span className="min-w-0 wrap-break-word">{label}</span>
+            </li>
           ))}
-        </div>
+        </ul>
       ) : (
-        <p className="mt-3 text-xs text-white/35">Nenhum benefício adicional informado.</p>
+        <p className="mt-2.5 text-[11px] text-white/40">
+          Nenhum benefício adicional informado.
+        </p>
       )}
     </section>
   );
