@@ -74,85 +74,80 @@ type TripVideoPreviewProps = {
 function TripVideoPreview({
   media,
 }: TripVideoPreviewProps) {
-  const videoRef =
-    useRef<HTMLVideoElement | null>(
-      null,
-    );
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
-  const [
-    isPlaying,
-    setIsPlaying,
-  ] = useState(false);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    // Autoplay sem áudio é permitido na maioria dos navegadores.
+    video.muted = true;
+    void video.play().catch(() => {
+      // Caso o navegador bloqueie autoplay, o botão Play permanece disponível.
+      setIsPlaying(false);
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        setIsLoading(false);
+      }
+    });
+  }, [media.url]);
 
   async function playVideo() {
-    if (!videoRef.current) {
-      return;
-    }
+    const video = videoRef.current;
+    if (!video) return;
 
+    setHasError(false);
     try {
-      await videoRef.current.play();
+      await video.play();
     } catch {
       setIsPlaying(false);
+      setIsLoading(false);
     }
   }
 
-  function pauseVideo() {
-    videoRef.current?.pause();
-  }
-
-  function supportsHover() {
-    return window.matchMedia(
-      "(hover: hover) and (pointer: fine)",
-    ).matches;
-  }
-
-  function handleMouseEnter() {
-    if (supportsHover()) {
-      void playVideo();
-    }
-  }
-
-  function handleMouseLeave() {
-    if (supportsHover()) {
-      pauseVideo();
-    }
-  }
-
-  function toggleVideo(
-    event:
-      | MouseEvent
-      | KeyboardEvent,
-  ) {
+  function toggleVideo(event: MouseEvent | KeyboardEvent) {
     event.preventDefault();
     event.stopPropagation();
 
-    if (videoRef.current?.paused) {
-      void playVideo();
-      return;
-    }
+    const video = videoRef.current;
+    if (!video) return;
 
-    pauseVideo();
+    if (video.paused) {
+      void playVideo();
+    } else {
+      video.pause();
+    }
   }
 
   return (
-    <span
-      className="absolute inset-0"
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-    >
+    <span className="absolute inset-0">
       <video
         ref={videoRef}
         src={media.url}
+        autoPlay
         muted
         loop
         playsInline
-        preload="metadata"
-        onPlay={() =>
-          setIsPlaying(true)
-        }
-        onPause={() =>
-          setIsPlaying(false)
-        }
+        preload="auto"
+        onLoadedData={() => setIsLoading(false)}
+        onCanPlay={() => setIsLoading(false)}
+        onWaiting={() => setIsLoading(true)}
+        onPlaying={() => {
+          setIsPlaying(true);
+          setIsLoading(false);
+          setHasError(false);
+        }}
+        onPause={() => {
+          setIsPlaying(false);
+          setIsLoading(false);
+        }}
+        onError={() => {
+          setIsPlaying(false);
+          setIsLoading(false);
+          setHasError(true);
+        }}
         className="
           size-full
           object-cover
@@ -162,60 +157,64 @@ function TripVideoPreview({
         "
       />
 
+      {isLoading && !hasError && (
+        <span
+          className="
+            pointer-events-none
+            absolute inset-0 z-10
+            flex items-center justify-center
+            bg-black/40
+          "
+          role="status"
+          aria-label="Carregando vídeo"
+        >
+          <LoaderCircle
+            size={30}
+            className="animate-spin text-yellow-400"
+          />
+        </span>
+      )}
+
+      {hasError && (
+        <span
+          className="
+            pointer-events-none absolute inset-0 z-10
+            flex items-center justify-center
+            bg-black/40 px-4 text-center
+            text-xs text-white/80
+          "
+        >
+          Não foi possível carregar o vídeo.
+        </span>
+      )}
+
       <span
         role="button"
         tabIndex={0}
-        aria-label={
-          isPlaying
-            ? "Pausar vídeo"
-            : "Reproduzir vídeo"
-        }
-        title={
-          isPlaying
-            ? "Pausar vídeo"
-            : "Reproduzir vídeo"
-        }
+        aria-label={isPlaying ? "Pausar vídeo" : "Reproduzir vídeo"}
+        title={isPlaying ? "Pausar vídeo" : "Reproduzir vídeo"}
         onClick={toggleVideo}
         onKeyDown={(event) => {
-          if (
-            event.key === "Enter" ||
-            event.key === " "
-          ) {
+          if (event.key === "Enter" || event.key === " ") {
             toggleVideo(event);
           }
         }}
         className="
-          absolute
-          bottom-3
-          right-3
-          z-20
-          flex
-          size-10
-          cursor-pointer
-          items-center
-          justify-center
-          rounded-full
-          border
-          border-white/20
-          bg-black/70
-          text-white
-          shadow-lg
-          backdrop-blur-sm
-          transition
-          hover:scale-105
-          hover:bg-black/85
-          focus:outline-none
-          focus:ring-2
+          absolute bottom-3 right-3 z-20
+          flex size-10 cursor-pointer
+          items-center justify-center
+          rounded-full border border-white/20
+          bg-black/70 text-white shadow-lg
+          backdrop-blur-sm transition
+          hover:scale-105 hover:bg-black/85
+          focus:outline-none focus:ring-2
           focus:ring-yellow-400
         "
       >
         {isPlaying ? (
           <Pause size={17} />
         ) : (
-          <Play
-            size={17}
-            className="ml-0.5"
-          />
+          <Play size={17} className="ml-0.5" />
         )}
       </span>
     </span>
