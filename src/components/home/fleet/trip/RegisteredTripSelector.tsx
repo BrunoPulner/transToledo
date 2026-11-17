@@ -14,6 +14,7 @@ import {
 import Image from "next/image";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -69,122 +70,176 @@ function getTripCover(
 
 type TripVideoPreviewProps = {
   media: TripMedia;
+  posterUrl?: string;
+  active: boolean;
+  onActivate: () => void;
+  onDeactivate: () => void;
 };
 
 function TripVideoPreview({
   media,
+  posterUrl,
+  active,
+  onActivate,
+  onDeactivate,
 }: TripVideoPreviewProps) {
+  const containerRef = useRef<HTMLSpanElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const [isTouchMode, setIsTouchMode] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
+  const [manualPause, setManualPause] = useState(false);
+  const activateRef = useRef(onActivate);
+  const deactivateRef = useRef(onDeactivate);
+  useEffect(() => {
+    activateRef.current = onActivate;
+    deactivateRef.current = onDeactivate;
+  }, [onActivate, onDeactivate]);
+
+  // No celular, o vídeo só é ativado quando a maior parte do card está visível.
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(hover: none), (pointer: coarse)");
+    const updateMode = () => setIsTouchMode(mediaQuery.matches);
+    updateMode();
+    mediaQuery.addEventListener("change", updateMode);
+    return () => mediaQuery.removeEventListener("change", updateMode);
+  }, []);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsVisible(entry.isIntersecting);
+        if (!entry.isIntersecting) setManualPause(false);
+      },
+      { threshold: 0.65 },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!isTouchMode) return;
+    if (isVisible && !manualPause && !document.hidden) {
+      activateRef.current();
+    } else if (!isVisible) {
+      deactivateRef.current();
+    }
+  }, [isTouchMode, isVisible, manualPause]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    // Autoplay sem áudio é permitido na maioria dos navegadores.
+    if (!active || document.hidden) {
+      video.pause();
+      return;
+    }
+
     video.muted = true;
+    // src é atribuído apenas ao vídeo ativo, evitando downloads em paralelo.
     void video.play().catch(() => {
-      // Caso o navegador bloqueie autoplay, o botão Play permanece disponível.
-      setIsPlaying(false);
-      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-        setIsLoading(false);
-      }
-    });
-  }, [media.url]);
-
-  async function playVideo() {
-    const video = videoRef.current;
-    if (!video) return;
-
-    setHasError(false);
-    try {
-      await video.play();
-    } catch {
       setIsPlaying(false);
       setIsLoading(false);
-    }
-  }
+      // Safari pode bloquear autoplay; o botão manual continua disponível.
+    });
+  }, [active, media.url]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden) {
+        videoRef.current?.pause();
+      } else if (active && !hasError) {
+        void videoRef.current?.play().catch(() => setIsPlaying(false));
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [active, hasError]);
 
   function toggleVideo(event: MouseEvent | KeyboardEvent) {
     event.preventDefault();
     event.stopPropagation();
 
-    const video = videoRef.current;
-    if (!video) return;
-
-    if (video.paused) {
-      void playVideo();
+    if (active && isPlaying) {
+      setManualPause(true);
+      onDeactivate();
     } else {
-      video.pause();
+      setManualPause(false);
+      setHasError(false);
+      if (active && hasError) {
+        videoRef.current?.load();
+        void videoRef.current?.play().catch(() => setIsPlaying(false));
+      } else {
+        onActivate();
+      }
     }
   }
 
   return (
-    <span className="absolute inset-0">
+    <span
+      ref={containerRef}
+      className="absolute inset-0 block bg-black/50"
+      onMouseEnter={() => {
+        if (!isTouchMode && !manualPause) onActivate();
+      }}
+      onMouseLeave={() => {
+        if (!isTouchMode) {
+          setManualPause(false);
+          onDeactivate();
+        }
+      }}
+    >
       <video
         ref={videoRef}
-        src={media.url}
-        autoPlay
+        src={active ? media.url : undefined}
+        poster={posterUrl}
+        onLoadedMetadata={(event) => {
+          const video = event.currentTarget;
+          if (Number.isFinite(video.duration) && video.duration > 1) {
+            video.currentTime = 1;
+          }
+        }}
         muted
         loop
         playsInline
-        preload="auto"
+        preload="none"
+        onLoadStart={() => setIsLoading(true)}
         onLoadedData={() => setIsLoading(false)}
         onCanPlay={() => setIsLoading(false)}
-        onWaiting={() => setIsLoading(true)}
+        onWaiting={() => { if (active) setIsLoading(true); }}
         onPlaying={() => {
           setIsPlaying(true);
           setIsLoading(false);
           setHasError(false);
         }}
-        onPause={() => {
-          setIsPlaying(false);
-          setIsLoading(false);
-        }}
+        onPause={() => setIsPlaying(false)}
         onError={() => {
+          if (!active) return;
           setIsPlaying(false);
           setIsLoading(false);
           setHasError(true);
         }}
-        className="
-          size-full
-          object-cover
-          transition
-          duration-500
-          group-hover:scale-105
-        "
+        className="size-full object-cover transition duration-500 group-hover:scale-105"
       />
 
-      {isLoading && !hasError && (
+      {active && isLoading && !hasError && (
         <span
-          className="
-            pointer-events-none
-            absolute inset-0 z-10
-            flex items-center justify-center
-            bg-black/40
-          "
+          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/40"
           role="status"
           aria-label="Carregando vídeo"
         >
-          <LoaderCircle
-            size={30}
-            className="animate-spin text-yellow-400"
-          />
+          <LoaderCircle size={30} className="animate-spin text-yellow-400" />
         </span>
       )}
 
-      {hasError && (
-        <span
-          className="
-            pointer-events-none absolute inset-0 z-10
-            flex items-center justify-center
-            bg-black/40 px-4 text-center
-            text-xs text-white/80
-          "
-        >
-          Não foi possível carregar o vídeo.
+      {active && hasError && (
+        <span className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/40 px-4 text-center text-xs text-white/80">
+          Não foi possível carregar o vídeo. Toque para tentar novamente.
         </span>
       )}
 
@@ -195,27 +250,11 @@ function TripVideoPreview({
         title={isPlaying ? "Pausar vídeo" : "Reproduzir vídeo"}
         onClick={toggleVideo}
         onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            toggleVideo(event);
-          }
+          if (event.key === "Enter" || event.key === " ") toggleVideo(event);
         }}
-        className="
-          absolute bottom-3 right-3 z-20
-          flex size-10 cursor-pointer
-          items-center justify-center
-          rounded-full border border-white/20
-          bg-black/70 text-white shadow-lg
-          backdrop-blur-sm transition
-          hover:scale-105 hover:bg-black/85
-          focus:outline-none focus:ring-2
-          focus:ring-yellow-400
-        "
+        className="absolute bottom-3 right-3 z-20 flex size-10 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-black/70 text-white shadow-lg backdrop-blur-sm transition hover:scale-105 hover:bg-black/85 focus:outline-none focus:ring-2 focus:ring-yellow-400"
       >
-        {isPlaying ? (
-          <Pause size={17} />
-        ) : (
-          <Play size={17} className="ml-0.5" />
-        )}
+        {isPlaying ? <Pause size={17} /> : <Play size={17} className="ml-0.5" />}
       </span>
     </span>
   );
@@ -253,6 +292,13 @@ export function RegisteredTripSelector({
   selectedTripId,
   onSelect,
 }: RegisteredTripSelectorProps) {
+  const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
+
+  const activateVideo = useCallback((id: string) => setActiveVideoId(id), []);
+  const deactivateVideo = useCallback((id: string) => {
+    setActiveVideoId((current) => current === id ? null : current);
+  }, []);
+
   const [
     trips,
     setTrips,
@@ -565,6 +611,10 @@ export function RegisteredTripSelector({
                     "video" ? (
                       <TripVideoPreview
                         media={cover}
+                        posterUrl={trip.media.find((item) => item.type === "image")?.url}
+                        active={activeVideoId === trip.id}
+                        onActivate={() => activateVideo(trip.id)}
+                        onDeactivate={() => deactivateVideo(trip.id)}
                       />
                     ) : (
                       <Image
